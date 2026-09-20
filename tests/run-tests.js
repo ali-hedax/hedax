@@ -307,7 +307,7 @@ async function main() {
   ok("اعداد گزارش نمونه در کد ثابت نشده",
     !/(rowCount|uniqueCards|rowsWithoutCard)\s*[=:]\s*(79|47|32)\b/.test(appOnly));
   ok("وضعیت‌های فایل نمونه در کد ثابت نشده",
-    !appOnly.includes("در صف تقسيم کار") && !appOnly.includes("در صف تقسیم کار"));
+    !app.computeNobatStats.toString().includes("در صف تقسيم کار") && !app.computeNobatStats.toString().includes("در صف تقسیم کار"));
   ok("نام فایل نمونه در کد نیست", !/res\s*\(2\)\.xlsx/.test(appOnly));
   ok("مسیر یا نام فایل مبنای تشخیص نوع منبع نیست", !/fileHint\s*===|file\.name\s*\.includes/.test(appOnly));
 

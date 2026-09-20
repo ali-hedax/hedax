@@ -36,3 +36,9 @@ desktop.ini
 *.tmp
 *.bak
 *~
+
+# Local B2B session and logs
+.local/
+*.log
+playwright-report/
+test-results/

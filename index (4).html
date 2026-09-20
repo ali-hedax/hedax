@@ -414,6 +414,23 @@ button, select, input { font-family: inherit; }
     <section class="tab-panel" id="tab-nobat">
       <h1 class="section-title">نوبت‌دهی و برنامه تعمیرات</h1>
       <p class="section-sub">گزارش نوبت‌دهی روزانه — هر گزارش با تاریخ و محدودهٔ خودش نگهداری می‌شود</p>
+      <section id="b2bSyncPanel" aria-label="دریافت خودکار از B2B" style="border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:18px">
+        <h2 style="font-size:18px;margin:0 0 12px">دریافت از B2B ایساکو</h2>
+        <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:center;margin-bottom:12px">
+          <label><input id="b2bAuto" type="checkbox" checked> دریافت خودکار با بازشدن این بخش</label>
+          <label><input id="b2bToday" type="checkbox" checked> گزارش امروز</label>
+          <label for="b2bDate">تاریخ شمسی <input id="b2bDate" type="text" inputmode="numeric" style="width:130px;min-height:44px" aria-label="تاریخ گزارش B2B"></label>
+          <label for="b2bStatus">وضعیت <select id="b2bStatus" style="min-height:44px"><option>همه</option><option>در صف نوبت</option><option>در صف پذیرش</option><option>در صف تقسیم کار</option><option>در صف سالن</option><option>در حال تعمیر</option><option>در صف تغییر جایگاه</option></select></label>
+          <label for="b2bHall">سالن <select id="b2bHall" style="min-height:44px"><option>سالن تعمیرات</option><option>فضای گازسوز</option><option>سرویس سریع</option></select></label>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:10px">
+          <button id="b2bRefresh" class="btn btn-primary" type="button" style="min-height:44px">به‌روزرسانی اکنون</button>
+          <button id="b2bLogin" class="btn btn-ghost" type="button" style="min-height:44px">ورود به B2B</button>
+        </div>
+        <p id="b2bMessage" role="status" aria-live="polite">در اولین اتصال، ورود را در پنجرهٔ B2B انجام دهید. پس از پایان اعتبار ورود، ورود دوباره لازم است.</p>
+        <p class="muted-note">تنها گزارش دریافت می‌شود. آخرین دادهٔ معتبر تا پایان دریافت و ذخیرهٔ گزارش جدید باقی می‌ماند.</p>
+      </section>
+
       <div id="nobatBody"></div>
     </section>
   </main>
@@ -3344,11 +3361,13 @@ const TAB_RENDERERS = { dashboard: renderDashboard, priority: renderPriority, sl
 const TAB_TITLES = { dashboard: "داشبورد", priority: "اولویت سفارش‌گذاری", slow: "کندگردش و راکد", emdad: "امداد ویژه", oil: "روغن و فیلتر", reception: "پذیرش تا ترخیص", nobat: "نوبت‌دهی و برنامه تعمیرات" };
 
 function switchTab(tab) {
+  const enteringNobat = tab === "nobat" && STATE.activeTab !== "nobat";
   STATE.activeTab = tab;
   document.querySelectorAll(".nav-item").forEach((n) => n.classList.toggle("active", n.dataset.tab === tab));
   document.querySelectorAll(".tab-panel").forEach((p) => p.classList.toggle("active", p.id === "tab-" + tab));
   document.getElementById("pageTitle").textContent = TAB_TITLES[tab];
   renderActiveTab();
+  if (enteringNobat) B2BSync.onOpen();
 }
 function renderActiveTab() { (TAB_RENDERERS[STATE.activeTab] || renderDashboard)(); }
 
@@ -3384,11 +3403,125 @@ function setTheme(t) {
 function initApp() {
   recomputeDerived();
   initShell();
+  B2BSync.init();
   renderActiveTab();
   // گزارش‌های نوبت‌دهی ذخیره‌شده را بازیابی کن (با تازه‌سازی صفحه پاک نمی‌شوند)
   loadNobatFromStore();
 }
 document.addEventListener("DOMContentLoaded", initApp);
+
+</script>
+<script>
+/* Local companion: no B2B credentials or remote operational requests in this page. */
+const B2BSync = (() => {
+  let busy = false, token = null, configured = false;
+  const $ = id => document.getElementById(id);
+  function today() {
+    const p = new Intl.DateTimeFormat('en-US-u-ca-persian-nu-latn', {timeZone:'Asia/Tehran',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());
+    const v = t => p.find(x=>x.type===t).value;
+    return v('year') + '/' + v('month') + '/' + v('day');
+  }
+  function message(text, error=false) {
+    if (!$('b2bMessage')) return;
+    $('b2bMessage').textContent = text;
+    $('b2bMessage').style.color = error ? 'var(--danger)' : '';
+  }
+  function setBusy(value) {
+    busy=value;
+    $('b2bSyncPanel').setAttribute('aria-busy',String(value));
+    for (const id of ['b2bRefresh','b2bLogin','b2bDate','b2bToday','b2bStatus','b2bHall','b2bAuto']) $(id).disabled=value;
+    if (!value) $('b2bDate').disabled=$('b2bToday').checked;
+  }
+  function save() {
+    try { localStorage.setItem('hedax-b2b-settings',JSON.stringify({enabled:$('b2bAuto').checked,today:$('b2bToday').checked,dateKey:$('b2bDate').value,statusFilter:$('b2bStatus').value,hall:$('b2bHall').value})); } catch {}
+  }
+  async function request(route, body) {
+    if (!token) {
+      const r = await fetch('/api/b2b/session',{cache:'no-store',signal:AbortSignal.timeout(5000)});
+      if (!r.ok) throw new Error('همراه محلی اجرا نیست. هداکس را با start-hedax.cmd اجرا کنید.');
+      const s=await r.json(); if (!s.token) throw new Error('همراه محلی هداکس در دسترس نیست.'); token=s.token;
+    }
+    const r=await fetch('/api/b2b/' + route,{method:'POST',headers:{'Content-Type':'application/json','X-Hedax-Token':token},body:JSON.stringify(body),signal:AbortSignal.timeout(180000)});
+    const result=await r.json();
+    if (!r.ok) { if (r.status===403) token=null; throw new Error(result.message || 'دریافت گزارش کامل نشد.'); }
+    return result;
+  }
+  async function run() {
+    if (busy) return;
+    let parsed;
+    try {
+      if ($('b2bToday').checked) $('b2bDate').value=today();
+      parsed=parseJalaliInput($('b2bDate').value);
+      if (!parsed.valid) throw new Error(parsed.reason);
+      save(); setBusy(true);
+      const scope={dateKey:parsed.key,statusFilter:$('b2bStatus').value,hall:$('b2bHall').value};
+      message('در حال دریافت گزارش ' + parsed.key + ' از B2B… آخرین گزارش تا پایان دریافت باقی می‌ماند.');
+      const payload=await request('sync',scope);
+      const result=await importB2BReport(payload,scope);
+      message((result.duplicate ? 'بررسی شد؛ همین گزارش قبلاً ثبت شده بود.' : 'گزارش جدید دریافت و ذخیره شد.') + ' آخرین دریافت: ' + fmtJalaliDateTime(payload.receivedAt));
+      try { localStorage.setItem('hedax-b2b-last-success',String(payload.receivedAt)); } catch {}
+    } catch(e) {
+      message((e.name==='TimeoutError' ? 'زمان دریافت طولانی شد؛ وضعیت B2B را بررسی و دوباره تلاش کنید.' : e.message) + ' آخرین گزارش معتبر حفظ شده است.',true);
+    } finally { if ($('b2bSyncPanel')) setBusy(false); }
+  }
+  async function login() {
+    if(busy) return;
+    setBusy(true); message('در حال بازکردن پنجرهٔ ورود B2B…');
+    try { message((await request('login',{})).message); }
+    catch(e) { message(e.message,true); }
+    finally { setBusy(false); }
+  }
+  function init() {
+    if(configured || !$('b2bSyncPanel')) return; configured=true;
+    let saved={}; try { saved=JSON.parse(localStorage.getItem('hedax-b2b-settings') || '{}'); } catch {}
+    $('b2bAuto').checked=saved.enabled !== false;
+    $('b2bToday').checked=saved.today !== false;
+    $('b2bDate').value=$('b2bToday').checked ? today() : (saved.dateKey || today());
+    $('b2bDate').disabled=$('b2bToday').checked;
+    for (const [id,key] of [['b2bStatus','statusFilter'],['b2bHall','hall']]) {
+      if (Array.from($(id).options).some(x=>x.value===saved[key])) $(id).value=saved[key];
+    }
+    $('b2bRefresh').addEventListener('click',run);
+    $('b2bLogin').addEventListener('click',login);
+    for(const id of ['b2bAuto','b2bToday','b2bDate','b2bStatus','b2bHall']) $(id).addEventListener('change',()=>{
+      $('b2bDate').disabled=$('b2bToday').checked;
+      if($('b2bToday').checked) $('b2bDate').value=today(); save();
+    });
+    let last; try { last=Number(localStorage.getItem('hedax-b2b-last-success')); } catch {}
+    if(last) message('آخرین دریافت موفق: ' + fmtJalaliDateTime(last));
+  }
+  function onOpen() { init(); if($('b2bAuto') && $('b2bAuto').checked) void run(); }
+  return {init,onOpen,run};
+})();
+async function importB2BReport(payload, expectedScope) {
+  if(!payload || !payload.scope || nobatScopeKey(payload.scope)!==nobatScopeKey(expectedScope) || !Number.isFinite(payload.receivedAt)) throw new Error('تاریخ یا محدودهٔ فایل دریافتی با درخواست هم‌خوان نیست.');
+  if(typeof payload.base64!=='string' || payload.base64.length > 36*1024*1024) throw new Error('حجم یا محتوای فایل نامعتبر است.');
+  const bin=atob(payload.base64), bytes=Uint8Array.from(bin,c=>c.charCodeAt(0));
+  const file=new File([bytes],payload.fileName || 'b2b-nobat.xlsx');
+  const parsed=parseJalaliInput(payload.scope.dateKey);
+  if(!parsed.valid) throw new Error('تاریخ گزارش معتبر نیست.');
+  const res=await ingestFile('n',file);
+  if(!res.ok || res.needsManualMap || !res.records.length) throw new Error('گزارش دریافتی خالی یا ناسازگار است؛ برای بررسی فایل از ورودی دستی استفاده کنید.');
+  if(STATE.nobat.ready) await STATE.nobat.ready;
+  // Refresh the list from disk before deciding revision/duplicate after another tab imported.
+  const stored=await NobatStore.all();
+  const merged=new Map(STATE.nobat.reports.map(r=>[r.id,r])); stored.forEach(r=>merged.set(r.id,r));
+  const existing=Array.from(merged.values());
+  const meta={...payload.scope,jy:parsed.jy,jm:parsed.jm,jd:parsed.jd,dateLabel:parsed.label,
+    receivedAt:payload.receivedAt,fileName:file.name,contentHash:await hashBytes(bytes.buffer)};
+  const verdict=classifyIncomingReport(existing,{scopeKey:nobatScopeKey(meta),contentHash:meta.contentHash});
+  if(verdict.action==='duplicate') {
+    STATE.nobat.reports=existing; STATE.nobat.activeScope=nobatScopeKey(meta);
+    setActiveNobatSource(); renderFileDots(); renderActiveTab();
+    return {duplicate:true};
+  }
+  const report=buildNobatReport(meta,res.records,res.diag,verdict.revision);
+  report.source='b2b'; report.fetchedAt=payload.receivedAt;
+  // A failed durable write must never be reported as a successful automatic refresh.
+  await NobatStore.put(report);
+  STATE.nobat.reports=existing.concat(report); STATE.nobat.activeScope=report.scopeKey;
+  setActiveNobatSource(); renderFileDots(); renderActiveTab(); return {duplicate:false};
+}
 
 </script>
 </body>
