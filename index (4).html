@@ -140,6 +140,7 @@ button, select, input { font-family: inherit; }
 .upload-status { margin-top: 10px; font-size: 12px; }
 .upload-status.success { color: var(--ok); }
 .upload-status.error { color: var(--danger); }
+.upload-status.warn { color: var(--gold); }
 .progress-bar { height: 6px; border-radius: 4px; background: var(--surface-2); overflow: hidden; margin-top: 8px; }
 .progress-bar > div { height: 100%; background: linear-gradient(90deg, var(--gold), var(--teal)); width: 0%; transition: width .2s; }
 .upload-actions { margin-top: 8px; display: flex; gap: 6px; }
@@ -308,6 +309,26 @@ button, select, input { font-family: inherit; }
   .card { border: 1px solid #ccc; }
 }
 
+
+/* ---------- نوبت‌دهی و برنامه تعمیرات ---------- */
+.meta-form { display: grid; gap: 12px; }
+.meta-form .meta-row { display: grid; grid-template-columns: 190px 1fr; gap: 10px; align-items: center; }
+.meta-form label { font-size: 12.5px; color: var(--muted); }
+.meta-form input[type="text"], .meta-form select {
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+  border-radius: 8px; padding: 7px 10px; font: inherit; font-size: 13px; width: 100%;
+}
+.meta-form input.invalid { border-color: var(--danger); }
+.meta-hint { font-size: 11px; color: var(--muted); grid-column: 2 / -1; margin: -6px 0 0; }
+.scope-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
+.scope-bar select { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 6px 10px; font: inherit; font-size: 12.5px; }
+.limit-note { border-inline-start: 3px solid var(--gold); background: color-mix(in srgb, var(--gold) 8%, transparent); border-radius: 6px; padding: 10px 12px; margin: 0 0 12px; }
+.limit-note ul { margin: 6px 0 0; padding-inline-start: 18px; }
+.limit-note li { font-size: 12px; color: var(--muted); margin-bottom: 4px; line-height: 1.7; }
+.rev-list { list-style: none; margin: 0; padding: 0; }
+.rev-list li { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+.rev-list li:last-child { border-bottom: 0; }
+.rev-list .rev-file { color: var(--muted); word-break: break-all; }
 </style>
 </head>
 <body>
@@ -334,6 +355,7 @@ button, select, input { font-family: inherit; }
     <div class="nav-item" data-tab="emdad"><span class="nav-icon"></span><span>امداد ویژه</span></div>
     <div class="nav-item" data-tab="oil"><span class="nav-icon"></span><span>روغن و فیلتر</span></div>
     <div class="nav-item" data-tab="reception"><span class="nav-icon"></span><span>پذیرش تا ترخیص</span></div>
+    <div class="nav-item" data-tab="nobat"><span class="nav-icon"></span><span>نوبت‌دهی و برنامه تعمیرات</span></div>
   </nav>
 
   <main class="main-content">
@@ -387,6 +409,13 @@ button, select, input { font-family: inherit; }
       <p class="section-sub">زمان‌سنجی فرآیند پذیرش تا ترخیص خودرو</p>
       <div id="receptionBody"></div>
     </section>
+
+    <!-- تب ۷: نوبت‌دهی و برنامه تعمیرات -->
+    <section class="tab-panel" id="tab-nobat">
+      <h1 class="section-title">نوبت‌دهی و برنامه تعمیرات</h1>
+      <p class="section-sub">گزارش نوبت‌دهی روزانه — هر گزارش با تاریخ و محدودهٔ خودش نگهداری می‌شود</p>
+      <div id="nobatBody"></div>
+    </section>
   </main>
 </div>
 
@@ -432,6 +461,35 @@ function normNum(s) {
   if (isNaN(v)) return NaN;
   return neg ? -v : v;
 }
+/* مقدار شناسه‌ای (شماره کارت، شماره نوبت، پلاک…) را همیشه به‌صورت متن نگه می‌دارد.
+   اعداد بزرگ هرگز به نماد نمایی تبدیل نمی‌شوند و صفرهای ابتدایی از بین نمی‌روند. */
+function textCell(raw) {
+  if (raw === null || raw === undefined) return "";
+  let t;
+  if (typeof raw === "number") t = Number.isFinite(raw) ? (Number.isInteger(raw) ? raw.toFixed(0) : String(raw)) : "";
+  else t = String(raw);
+  t = digitsToLatin(t).replace(/[‌‎‏​]/g, " ").replace(/\s+/g, " ").trim();
+  return t;
+}
+
+/* ورودی تاریخ شمسی کاربر -> {valid, jy, jm, jd, key, label}. فقط تاریخ‌های شمسی معتبر پذیرفته می‌شوند. */
+function parseJalaliInput(raw) {
+  const s = digitsToLatin(String(raw === null || raw === undefined ? "" : raw)).trim();
+  if (!s) return { valid: false, reason: "تاریخ گزارش وارد نشده است." };
+  const m = s.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})$/);
+  if (!m) return { valid: false, reason: "قالب تاریخ باید مثل ۱۴۰۵/۰۶/۲۸ باشد." };
+  const jy = parseInt(m[1], 10), jm = parseInt(m[2], 10), jd = parseInt(m[3], 10);
+  if (jy < 1300 || jy > 1500) return { valid: false, reason: "سال شمسی باید بین ۱۳۰۰ تا ۱۵۰۰ باشد." };
+  if (jm < 1 || jm > 12) return { valid: false, reason: "ماه باید بین ۱ تا ۱۲ باشد." };
+  const maxDay = jm <= 6 ? 31 : (jm <= 11 ? 30 : 30);
+  if (jd < 1 || jd > maxDay) return { valid: false, reason: "روز برای این ماه معتبر نیست." };
+  const jdn = JAL.j2d(jy, jm, jd);
+  const back = JAL.d2j(jdn);
+  if (back.jy !== jy || back.jm !== jm || back.jd !== jd) return { valid: false, reason: "این تاریخ در تقویم شمسی وجود ندارد." };
+  return { valid: true, jy, jm, jd, jdn, key: jalaliKey(jy, jm, jd), label: jd + " " + JMONTHS[jm - 1] + " " + jy };
+}
+function jalaliKey(jy, jm, jd) { return jy + "/" + String(jm).padStart(2, "0") + "/" + String(jd).padStart(2, "0"); }
+
 function fmtInt(n) {
   if (n === null || n === undefined || isNaN(n)) return "—";
   return Math.round(n).toLocaleString("en-US");
@@ -773,6 +831,37 @@ function detectHeaderRow(grid, expectedHeaders, maxScan) {
 }
 
 /* نگاشت خودکار فیلد -> شماره ستون بر اساس مترادف‌ها */
+/* نگاشت سخت‌گیرانه بر اساس «نام» ستون — نه موقعیت و نه نام فایل.
+   تفاوت ی/ي، ک/ك، اعراب، نیم‌فاصله، ارقام فارسی/عربی و فاصله‌های اضافی توسط normKey یکسان می‌شوند.
+   هر ستون فقط یک بار مصرف می‌شود و تطابق دقیقِ نام همیشه بر تطابق جزئی اولویت دارد. */
+function mapColumnsByName(headerRow, fieldDefs) {
+  const normed = headerRow.map((h) => normKey(h));
+  const map = {}, taken = new Set();
+  fieldDefs.forEach((f) => { map[f.key] = -1; });
+  // مرحله ۱: تطابق کاملاً دقیق نام
+  for (const f of fieldDefs) {
+    for (const syn of f.synonyms) {
+      const ns = normKey(syn);
+      const idx = normed.findIndex((h, i) => h === ns && !taken.has(i));
+      if (idx > -1) { map[f.key] = idx; taken.add(idx); break; }
+    }
+  }
+  // مرحله ۲: تطابق جزئی، فقط برای فیلدهای بی‌نتیجه و ستون‌های مصرف‌نشده
+  for (const f of fieldDefs) {
+    if (map[f.key] > -1) continue;
+    for (const syn of f.synonyms) {
+      const ns = normKey(syn);
+      if (ns.length < 3) continue;
+      const idx = normed.findIndex((h, i) => !taken.has(i) && h.length > 2 && (h.includes(ns) || ns.includes(h)));
+      if (idx > -1) { map[f.key] = idx; taken.add(idx); break; }
+    }
+  }
+  return { map, foundHeaders: headerRow.map((h) => norm(h)).filter(Boolean) };
+}
+
+/* فیلدهایی که نبودشان یعنی «این فایل از این نوع نیست» — جدا از الزامی‌بودن در سطح ردیف */
+function mapRequiredFields(def) { return def.fields.filter((f) => f.required || f.identifies); }
+
 function autoMapColumns(headerRow, fieldDefs) {
   const map = {}; const found = [];
   const normed = headerRow.map((h) => normKey(h));
@@ -854,6 +943,34 @@ const SOURCE_DEFS = {
       { key: "finalAmount", label: "مبلغ نهایی قابل پرداخت", synonyms: ["مبلغ نهايي قابل پرداخت توسط مشتري", "مبلغ نهایی قابل پرداخت توسط مشتری"], required: false, numeric: true },
     ],
   },
+  n: {
+    id: "n", title: "نوبت‌دهی و برنامه تعمیرات", fileHint: "گزارش نوبت دهی",
+    strictNames: true,
+    // شیت بر اساس نام انتخاب می‌شود؛ اگر پیدا نشد، بر اساس تطابق ستون‌ها (نه نام فایل)
+    preferSheet: ["گزارش نوبت دهی", "نوبت دهی", "نوبت"],
+    // هیچ ستونی در سطح ردیف الزامی نیست: ردیف بدون «شماره کارت» حذف نمی‌شود،
+    // چون می‌تواند مربوط به مرحله پیش از پذیرش باشد. identifies فقط برای تشخیص نوع فایل است.
+    fields: [
+      { key: "cardNo", label: "شماره کارت", synonyms: ["شماره کارت", "شماره کارت پذیرش"], text: true, identifies: true },
+      { key: "vehicle", label: "نوع خودرو", synonyms: ["نوع خودرو"], text: true },
+      { key: "turnNo", label: "شماره نوبت", synonyms: ["شماره نوبت"], text: true, identifies: true },
+      { key: "plate", label: "پلاک", synonyms: ["پلاک", "شماره پلاک"], text: true },
+      { key: "customer", label: "نام مشتری", synonyms: ["نام مشتری"], text: true },
+      { key: "slot", label: "جایگاه", synonyms: ["جایگاه"], text: true },
+      { key: "channel", label: "کانال ثبت نوبت", synonyms: ["کانال ثبت نوبت"], text: true },
+      { key: "stopReason", label: "علت توقف", synonyms: ["علت توقف"], text: true },
+      { key: "stopDuration", label: "مدت زمان توقف", synonyms: ["مدت زمان توقف"], text: true },
+      { key: "receptionTime", label: "زمان پذیرش", synonyms: ["زمان پذیرش"], text: true },
+      { key: "mechanic", label: "مکانیکی", synonyms: ["مکانیکی"], text: true },
+      { key: "electric", label: "برق", synonyms: ["برق"], text: true },
+      { key: "steering", label: "میزان فرمان و جلوبندی", synonyms: ["میزان فرمان و جلوبندی", "فرمان و جلوبندی"], text: true },
+      { key: "cng", label: "CNG", synonyms: ["CNG", "سی ان جی"], text: true },
+      { key: "bodyPaint", label: "صافکاری و نقاشی", synonyms: ["صافکاری و نقاشی"], text: true },
+      { key: "visitStatus", label: "وضعیت مراجعه", synonyms: ["وضعیت مراجعه"], text: true, identifies: true },
+      { key: "estClearTime", label: "زمان تقریبی ترخیص", synonyms: ["زمان تقریبی ترخیص"], text: true },
+      { key: "callUp", label: "فراخوان", synonyms: ["فراخوان"], text: true },
+    ],
+  },
 };
 
 function classifyTurnover(raw) {
@@ -865,6 +982,21 @@ function classifyTurnover(raw) {
   return "نامشخص";
 }
 const TURNOVER_LEVELS = ["تند گردش", "متوسط گردش", "کند گردش", "راکد"];
+
+/* انتخاب شیت: اول نام‌های مورد انتظار، بعد بیشترین تعداد ردیف. نام فایل نقشی ندارد. */
+function pickSheet(sheets, def) {
+  if (!sheets.length) throw new Error("هیچ شیتی در فایل پیدا نشد.");
+  if (def.preferSheet) {
+    for (const hint of def.preferSheet) {
+      const hk = normKey(hint);
+      const hit = sheets.find((sh) => normKey(sh.name) === hk) || sheets.find((sh) => normKey(sh.name).includes(hk));
+      if (hit && hit.rows.length) return hit;
+    }
+  }
+  let best = sheets[0];
+  for (const sh of sheets) if (sh.rows.length > best.rows.length) best = sh;
+  return best;
+}
 
 /* ---------- تشخیص فرمت بر اساس بایت‌های اول (۳.۱) ---------- */
 function sniffFormat(arrayBuffer) {
@@ -902,9 +1034,9 @@ async function ingestFile(sourceId, file) {
       sheetsAll = await parseXlsxNative(buf);
       diag.sheetNames = sheetsAll.map((s) => s.name);
       // بزرگ‌ترین شیت با بیشترین ردیف را انتخاب کن
-      let best = sheetsAll[0];
-      for (const s of sheetsAll) if (s.rows.length > best.rows.length) best = s;
+      let best = pickSheet(sheetsAll, def);
       grid = best.rows;
+      diag.pickedSheet = best.name;
       diag.encoding = "utf-8 (XML)";
     } else if (sniff.kind === "html") {
       const expected = def.fields.filter((f) => f.required).map((f) => f.label);
@@ -927,9 +1059,9 @@ async function ingestFile(sourceId, file) {
     diag.previewRows = grid.slice(hd.headerRowIndex, hd.headerRowIndex + 4);
     diag.grid = grid;
 
-    const mapped = autoMapColumns(headerRow, def.fields);
+    const mapped = def.strictNames ? mapColumnsByName(headerRow, def.fields) : autoMapColumns(headerRow, def.fields);
     diag.columnMap = mapped.map;
-    const missingRequired = def.fields.filter((f) => f.required && mapped.map[f.key] === -1);
+    const missingRequired = mapRequiredFields(def).filter((f) => mapped.map[f.key] === -1);
     if (missingRequired.length > 0 || hd.score <= 0) {
       diag.needsManualMap = true;
       return { ok: false, needsManualMap: true, diag, def, grid, headerRowIndex: hd.headerRowIndex };
@@ -957,6 +1089,7 @@ function buildRecords(def, grid, headerRowIndex, colMap, diag) {
       const idx = colMap[f.key];
       const raw = idx > -1 ? row[idx] : "";
       if (f.numeric) rec[f.key] = normNum(raw);
+      else if (f.text) rec[f.key] = textCell(raw); // شناسه‌ها به‌صورت متن حفظ می‌شوند
       else rec[f.key] = norm(raw);
       if (f.required) {
         if (f.numeric ? (raw === "" || raw === undefined) : !norm(raw)) bad = true;
@@ -1667,6 +1800,7 @@ const ICONS = {
   emdad: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l9 4.5v6c0 5-3.6 8.4-9 9.5-5.4-1.1-9-4.5-9-9.5v-6L12 2z"/><path d="M12 8v5M12 16h.01"/></svg>`,
   oil: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2s6 6.5 6 11a6 6 0 1 1-12 0c0-4.5 6-11 6-11z"/></svg>`,
   reception: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 3v2h6V3M8 12l2.5 2.5L16 9"/></svg>`,
+  nobat: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/><circle cx="12" cy="15" r="3.2"/><path d="M12 13.4V15l1.1.9"/></svg>`,
   upload: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>`,
   sun: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2M12 20v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M2 12h2M20 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></svg>`,
   moon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z"/></svg>`,
@@ -1701,6 +1835,172 @@ const HEDAX_LOGO = `
 </script>
 <script>
 /* ============================================================
+   HEDAX — نوبت‌دهی و برنامه تعمیرات: آمار، دامنه گزارش، نسخه‌ها
+   و نگهداری محلی روی IndexedDB
+   ============================================================ */
+"use strict";
+
+const NOBAT_EMPTY_STATUS = "(بدون مقدار)";
+const NOBAT_STATUS_ALL = "همه";
+const NOBAT_HALL_DEFAULT = "سالن تعمیرات";
+
+/* ---------- آمار گزارش نوبت‌دهی ----------
+   هیچ ردیفی حذف نمی‌شود. «تعداد ردیف» عمداً «تعداد پذیرش» نام‌گذاری نشده،
+   چون هر ردیف لزوماً یک پذیرش انجام‌شده نیست. */
+function computeNobatStats(records) {
+  const rowCount = records.length;
+  const cardValues = records.map((r) => textCell(r.cardNo));
+  const rowsWithCard = cardValues.filter(Boolean);
+  const rowsWithoutCard = rowCount - rowsWithCard.length;
+  const uniqueCards = new Set(rowsWithCard.map(normKey)).size;
+
+  const turnValues = records.map((r) => textCell(r.turnNo)).filter(Boolean);
+  const uniqueTurns = new Set(turnValues.map(normKey)).size; // فقط از مقادیر موجود
+  const rowsWithoutTurn = rowCount - turnValues.length;
+
+  const byStatus = new Map();
+  for (const r of records) {
+    const raw = textCell(r.visitStatus);
+    const label = raw || NOBAT_EMPTY_STATUS;
+    const k = normKey(label);
+    if (!byStatus.has(k)) byStatus.set(k, { label, count: 0, cards: new Set(), rowsWithoutCard: 0 });
+    const e = byStatus.get(k);
+    e.count++;
+    const c = textCell(r.cardNo);
+    if (c) e.cards.add(normKey(c)); else e.rowsWithoutCard++;
+  }
+  const statusRows = Array.from(byStatus.values())
+    .map((e) => ({ label: e.label, count: e.count, uniqueCards: e.cards.size, rowsWithoutCard: e.rowsWithoutCard, share: rowCount ? e.count / rowCount : 0 }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "fa"));
+
+  return { rowCount, uniqueCards, rowsWithoutCard, uniqueTurns, rowsWithoutTurn, statusRows };
+}
+
+/* ---------- دامنه گزارش: تاریخ + فیلتر وضعیت مراجعه + سالن ---------- */
+function nobatScopeKey(meta) {
+  return [meta.dateKey || "", normKey(meta.statusFilter || ""), normKey(meta.hall || "")].join("|");
+}
+function nobatScopeLabel(meta) {
+  return "تاریخ " + (meta.dateKey || "—") + " · وضعیت مراجعه: " + (meta.statusFilter || "—") + " · " + (meta.hall || "—");
+}
+
+/* ---------- تشخیص تکراری / نسخه تازه ----------
+   دامنه یکسان + محتوای یکسان  => تکراری، دوباره ذخیره نمی‌شود (داده دو برابر نمی‌شود).
+   دامنه یکسان + محتوای متفاوت => نسخه تازه؛ آمار پیش‌فرض از همین نسخه ساخته می‌شود.
+   دامنه متفاوت                 => گزارش مستقل؛ هرگز با دامنه‌های دیگر جمع نمی‌شود. */
+function classifyIncomingReport(existing, incoming) {
+  const sameScope = existing.filter((r) => r.scopeKey === incoming.scopeKey);
+  const exactDup = sameScope.find((r) => r.contentHash === incoming.contentHash);
+  if (exactDup) return { action: "duplicate", existing: exactDup, revision: exactDup.revision };
+  const otherScopeSameFile = existing.find((r) => r.contentHash === incoming.contentHash) || null;
+  const revision = sameScope.reduce((m, r) => Math.max(m, r.revision || 1), 0) + 1;
+  return {
+    action: revision > 1 ? "revision" : "new",
+    revision,
+    supersedes: sameScope.slice(),
+    sameFileOtherScope: otherScopeSameFile,
+  };
+}
+
+/* آخرین نسخه موفق هر دامنه — مبنای پیش‌فرض آمار */
+function latestPerScope(reports) {
+  const m = new Map();
+  for (const r of reports) {
+    const cur = m.get(r.scopeKey);
+    const better = !cur || (r.revision || 1) > (cur.revision || 1) ||
+      ((r.revision || 1) === (cur.revision || 1) && (r.receivedAt || 0) > (cur.receivedAt || 0));
+    if (better) m.set(r.scopeKey, r);
+  }
+  return Array.from(m.values()).sort((a, b) => String(b.dateKey).localeCompare(String(a.dateKey)) || (b.receivedAt || 0) - (a.receivedAt || 0));
+}
+function revisionsOfScope(reports, scopeKey) {
+  return reports.filter((r) => r.scopeKey === scopeKey)
+    .sort((a, b) => (b.revision || 1) - (a.revision || 1) || (b.receivedAt || 0) - (a.receivedAt || 0));
+}
+
+/* ---------- شناسه محتوای فایل (برای تشخیص بارگذاری تکراری) ---------- */
+async function hashBytes(arrayBuffer) {
+  try {
+    if (globalThis.crypto && globalThis.crypto.subtle && globalThis.crypto.subtle.digest) {
+      const d = await globalThis.crypto.subtle.digest("SHA-256", arrayBuffer);
+      return "sha256:" + Array.from(new Uint8Array(d)).map((b) => b.toString(16).padStart(2, "0")).join("");
+    }
+  } catch (e) { /* روی بعضی مرورگرها در file:// در دسترس نیست — روش جایگزین */ }
+  const bytes = new Uint8Array(arrayBuffer);
+  let h1 = 0x811c9dc5, h2 = 0x01000193;
+  for (let i = 0; i < bytes.length; i++) {
+    h1 = (h1 ^ bytes[i]) >>> 0; h1 = Math.imul(h1, 0x01000193) >>> 0;
+    h2 = (h2 + bytes[i]) >>> 0; h2 = Math.imul(h2, 0x85ebca6b) >>> 0;
+  }
+  return "fnv:" + bytes.length.toString(16) + "-" + h1.toString(16) + h2.toString(16);
+}
+
+/* ---------- نگهداری محلی روی IndexedDB ----------
+   داده با تازه‌سازی صفحه از بین نمی‌رود. اگر IndexedDB در دسترس نباشد،
+   برنامه بدون خطا کار می‌کند ولی داده ماندگار نخواهد بود. */
+const NobatStore = (() => {
+  const DB_NAME = "hedax", DB_VERSION = 1, STORE = "nobat_reports";
+  let dbPromise = null;
+  function idbFactory() { return NobatStore._idb || globalThis.indexedDB; }
+  function open() {
+    if (dbPromise) return dbPromise;
+    const idb = idbFactory();
+    if (!idb) return Promise.reject(new Error("IndexedDB در این مرورگر در دسترس نیست."));
+    dbPromise = new Promise((resolve, reject) => {
+      const req = idb.open(DB_NAME, DB_VERSION);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: "id" });
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error || new Error("باز کردن پایگاه داده محلی ناموفق بود."));
+    });
+    dbPromise.catch(() => { dbPromise = null; });
+    return dbPromise;
+  }
+  function run(mode, fn) {
+    return open().then((db) => new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, mode);
+      const store = tx.objectStore(STORE);
+      let out;
+      try { out = fn(store); } catch (e) { reject(e); return; }
+      tx.oncomplete = () => resolve(out && out.__req ? out.__req.result : out);
+      tx.onerror = () => reject(tx.error || new Error("عملیات پایگاه داده محلی ناموفق بود."));
+      tx.onabort = () => reject(tx.error || new Error("عملیات پایگاه داده محلی لغو شد."));
+    }));
+  }
+  return {
+    _idb: null,
+    reset() { dbPromise = null; },
+    all() { return run("readonly", (st) => ({ __req: st.getAll() })).then((r) => r || []); },
+    put(rec) { return run("readwrite", (st) => { st.put(rec); return rec; }); },
+    remove(id) { return run("readwrite", (st) => { st.delete(id); return id; }); },
+  };
+})();
+
+/* رکورد قابل ذخیره: نتیجه پردازش فایل + متادیتای تأییدشده کاربر */
+function buildNobatReport(meta, records, diag, revision) {
+  return {
+    id: nobatScopeKey(meta) + "|r" + revision + "|" + String(meta.contentHash).slice(-12),
+    scopeKey: nobatScopeKey(meta),
+    revision,
+    dateKey: meta.dateKey,       // تاریخ گزارش (شمسی) — از کاربر گرفته می‌شود، نه از داخل فایل
+    dateJ: { jy: meta.jy, jm: meta.jm, jd: meta.jd },
+    dateLabel: meta.dateLabel,
+    statusFilter: meta.statusFilter,
+    hall: meta.hall,
+    fileName: meta.fileName,
+    contentHash: meta.contentHash,
+    receivedAt: meta.receivedAt,  // زمان ورود فایل به هداکس — خودکار
+    sheetName: diag && diag.pickedSheet ? diag.pickedSheet : "",
+    rowCount: records.length,
+    records,
+  };
+}
+
+</script>
+<script>
+/* ============================================================
    HEDAX — لایه اپلیکیشن: مدیریت وضعیت، آپلود، تب‌ها، KPIها
    ============================================================ */
 "use strict";
@@ -1708,7 +2008,9 @@ const HEDAX_LOGO = `
 const STATE = {
   theme: "dark",
   activeTab: "dashboard",
-  sources: { alef: null, b: null, p: null, t: null }, // هر کدام: {records, diag}
+  sources: { alef: null, b: null, p: null, t: null, n: null }, // هر کدام: {records, diag}
+  // نوبت‌دهی: هر بارگذاری یک «گزارش» مستقل با تاریخ و محدودهٔ خودش است (روی IndexedDB)
+  nobat: { reports: [], activeScope: null, storeError: null, ready: null },
   weights: { emdad: 35, rate: 25, shortfall: 40 },
   manualPrices: new Map(), // code -> عدد قیمت بازار دستی
   selectedOrders: new Set(), // کدهای انتخاب‌شده برای فایل سفارش
@@ -1728,6 +2030,7 @@ const SOURCE_META = {
   b: { label: "گردش و سفارش‌گذاری", hint: "Dplns.xlsx", icon: "priority" },
   p: { label: "امداد ویژه", hint: "emdad.xlsx", icon: "emdad" },
   t: { label: "پذیرش تا ترخیص", hint: "paziresh.xlsx", icon: "reception" },
+  n: { label: "نوبت‌دهی و برنامه تعمیرات", hint: "شیت «گزارش نوبت دهی»", icon: "nobat" },
 };
 
 function normalizeWeights() {
@@ -2545,6 +2848,355 @@ function renderReception() {
 }
 
 /* ============================================================
+   تب: نوبت‌دهی و برنامه تعمیرات
+   ============================================================ */
+
+function fmtJalaliDateTime(ts) {
+  const d = new Date(ts);
+  if (!isFinite(d.getTime())) return "—";
+  const j = JAL.d2j(JAL.g2d(d.getFullYear(), d.getMonth() + 1, d.getDate()));
+  return jalaliKey(j.jy, j.jm, j.jd) + " ساعت " + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+}
+
+/* پیشنهادهای قبلی کاربر برای فیلتر/سالن — از گزارش‌های ذخیره‌شده، نه مقدار ثابت */
+function nobatKnownValues(key, extra) {
+  const set = new Set(extra || []);
+  STATE.nobat.reports.forEach((r) => { if (r[key]) set.add(r[key]); });
+  return Array.from(set);
+}
+
+/* ---------- گرفتن تاریخ و محدوده گزارش پیش از پردازش فایل ---------- */
+function openNobatMetaModal(file, onConfirm, onCancel) {
+  const overlay = document.createElement("div"); overlay.className = "modal-overlay";
+  const last = latestPerScope(STATE.nobat.reports)[0] || null;
+  const statusOpts = nobatKnownValues("statusFilter", [NOBAT_STATUS_ALL]);
+  const hallOpts = nobatKnownValues("hall", [NOBAT_HALL_DEFAULT]);
+  overlay.innerHTML = `
+    <div class="modal" role="dialog" aria-modal="true">
+      <h3>تاریخ و محدوده گزارش نوبت‌دهی</h3>
+      <p class="muted-note">فایل «${esc(file.name)}» تاریخ کامل را در خود ندارد، بنابراین تاریخ گزارش را باید شما وارد کنید. این تاریخ، تاریخ گزارش است و جایگزین تاریخ واقعی پذیرش نمی‌شود.</p>
+      <div class="meta-form">
+        <div class="meta-row">
+          <label for="nbDate">تاریخ گزارش (شمسی) *</label>
+          <input type="text" id="nbDate" inputmode="numeric" placeholder="۱۴۰۵/۰۶/۲۸" value="${esc(last ? last.dateKey : "")}">
+        </div>
+        <p class="meta-hint" id="nbDateHint">قالب: سال/ماه/روز — مثال ۱۴۰۵/۰۶/۲۸</p>
+        <div class="meta-row">
+          <label for="nbStatus">فیلتر وضعیت مراجعه</label>
+          <input type="text" id="nbStatus" list="nbStatusList" value="${esc(last ? last.statusFilter : NOBAT_STATUS_ALL)}">
+          <datalist id="nbStatusList">${statusOpts.map((o) => `<option value="${esc(o)}"></option>`).join("")}</datalist>
+        </div>
+        <p class="meta-hint">اگر خروجی بدون فیلتر گرفته شده، همان «${esc(NOBAT_STATUS_ALL)}» را بگذارید.</p>
+        <div class="meta-row">
+          <label for="nbHall">سالن تعمیرات</label>
+          <input type="text" id="nbHall" list="nbHallList" value="${esc(last ? last.hall : NOBAT_HALL_DEFAULT)}">
+          <datalist id="nbHallList">${hallOpts.map((o) => `<option value="${esc(o)}"></option>`).join("")}</datalist>
+        </div>
+        <div class="meta-row">
+          <label>زمان ورود به هداکس</label>
+          <span class="micro">${esc(fmtJalaliDateTime(Date.now()))} — خودکار ثبت می‌شود</span>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost btn-cancel-meta">انصراف</button>
+        <button type="button" class="btn btn-primary btn-confirm-meta">تأیید و پردازش فایل</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const dateEl = overlay.querySelector("#nbDate"), hintEl = overlay.querySelector("#nbDateHint");
+  dateEl.focus();
+  function close(cancelled) { overlay.remove(); if (cancelled && onCancel) onCancel(); }
+  overlay.querySelector(".btn-cancel-meta").addEventListener("click", () => close(true));
+  overlay.querySelector(".btn-confirm-meta").addEventListener("click", () => {
+    const parsed = parseJalaliInput(dateEl.value);
+    if (!parsed.valid) {
+      dateEl.classList.add("invalid");
+      hintEl.textContent = parsed.reason;
+      hintEl.style.color = "var(--danger)";
+      dateEl.focus();
+      return;
+    }
+    close(false);
+    onConfirm({
+      dateKey: parsed.key, jy: parsed.jy, jm: parsed.jm, jd: parsed.jd, dateLabel: parsed.label,
+      statusFilter: norm(overlay.querySelector("#nbStatus").value) || NOBAT_STATUS_ALL,
+      hall: norm(overlay.querySelector("#nbHall").value) || NOBAT_HALL_DEFAULT,
+    });
+  });
+  dateEl.addEventListener("input", () => { dateEl.classList.remove("invalid"); hintEl.style.color = ""; hintEl.textContent = "قالب: سال/ماه/روز — مثال ۱۴۰۵/۰۶/۲۸"; });
+}
+
+/* ---------- بارگذاری گزارش نوبت‌دهی ---------- */
+async function handleNobatUpload(file, meta) {
+  const card = document.getElementById("upcard-n");
+  const progress = card.querySelector(".progress-bar"), progressBar = progress.querySelector("div");
+  const statusEl = card.querySelector(".upload-status");
+  const fail = (msg) => {
+    progress.style.display = "none";
+    statusEl.style.display = "block"; statusEl.className = "upload-status error"; statusEl.textContent = msg;
+    card.querySelector(".upload-actions").style.display = "flex";
+    // آخرین داده معتبر دست‌نخورده باقی می‌ماند
+    toast(msg, "danger");
+  };
+  progress.style.display = "block"; progressBar.style.width = "15%";
+  statusEl.style.display = "none";
+  card.querySelector(".diag-slot").innerHTML = "";
+  const t0 = performance.now();
+  try {
+    // تا پایان بازیابی گزارش‌های قبلی صبر کن، وگرنه ممکن است تکراری تشخیص داده نشود
+    if (STATE.nobat.ready) { try { await STATE.nobat.ready; } catch (e) {} }
+    const buf = await file.arrayBuffer();
+    meta.fileName = file.name;
+    meta.contentHash = await hashBytes(buf);
+    meta.receivedAt = Date.now();
+    progressBar.style.width = "35%";
+
+    const verdict = classifyIncomingReport(STATE.nobat.reports, { scopeKey: nobatScopeKey(meta), contentHash: meta.contentHash });
+    if (verdict.action === "duplicate") {
+      progress.style.display = "none";
+      statusEl.style.display = "block"; statusEl.className = "upload-status warn";
+      statusEl.textContent = "این فایل با همین تاریخ و همین فیلترها قبلاً بارگذاری شده است (نسخه " + fmtInt(verdict.existing.revision) + "). داده دوباره اضافه نشد.";
+      card.querySelector(".upload-actions").style.display = "flex";
+      STATE.nobat.activeScope = verdict.existing.scopeKey;
+      setActiveNobatSource();
+      toast("بارگذاری تکراری — داده دو برابر نشد.", "warn");
+      renderFileDots(); renderActiveTab();
+      return;
+    }
+
+    const res = await ingestFile("n", file);
+    progressBar.style.width = "75%";
+    if (!res.ok && res.needsManualMap) {
+      progress.style.display = "none";
+      openManualMapModal(res.def, res.grid, res.headerRowIndex, (map, headerRowIndex) => {
+        const diag = res.diag;
+        const built = buildRecords(res.def, res.grid, headerRowIndex, map, diag);
+        diag.columnMap = map; diag.headerRowIndex = headerRowIndex;
+        diag.validRowCount = built.records.length; diag.rejectedRowCount = built.rejected; diag.needsManualMap = false;
+        commitNobatReport(meta, built.records, diag, verdict, t0);
+      });
+      return;
+    }
+    if (!res.ok) {
+      fail("فایل نوبت‌دهی پردازش نشد: " + ((res.error && res.error.message) || (res.diag && res.diag.errorMessage) || "خطای نامشخص"));
+      renderDiagnostics(card.querySelector(".diag-slot"), res.diag);
+      return;
+    }
+    if (!res.records.length) {
+      fail("در این فایل هیچ ردیف داده‌ای پیدا نشد. آخرین داده معتبر حفظ شد.");
+      renderDiagnostics(card.querySelector(".diag-slot"), res.diag);
+      return;
+    }
+    commitNobatReport(meta, res.records, res.diag, verdict, t0);
+  } catch (e) {
+    fail("خطای غیرمنتظره در بارگذاری نوبت‌دهی: " + e.message);
+  }
+}
+
+async function commitNobatReport(meta, records, diag, verdict, t0) {
+  const card = document.getElementById("upcard-n");
+  const progress = card.querySelector(".progress-bar"), progressBar = progress.querySelector("div");
+  const statusEl = card.querySelector(".upload-status");
+  const report = buildNobatReport(meta, records, diag, verdict.revision);
+
+  STATE.nobat.reports = STATE.nobat.reports.filter((r) => r.id !== report.id).concat([report]);
+  STATE.nobat.activeScope = report.scopeKey;
+  setActiveNobatSource();
+
+  let persisted = true;
+  try { await NobatStore.put(report); } catch (e) { persisted = false; }
+
+  progressBar.style.width = "100%";
+  setTimeout(() => { progress.style.display = "none"; }, 250);
+  const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+  statusEl.style.display = "block"; statusEl.className = "upload-status success";
+  statusEl.textContent = `${report.fileName} — ${fmtInt(report.rowCount)} ردیف — ` +
+    (verdict.action === "revision" ? `نسخه ${fmtInt(report.revision)} برای همین تاریخ و فیلترها — ` : "") +
+    `${elapsed} ثانیه` + (persisted ? "" : " — هشدار: ذخیره محلی انجام نشد");
+  card.querySelector(".upload-actions").style.display = "flex";
+  if (verdict.sameFileOtherScope) {
+    toast("همین فایل قبلاً با تاریخ/فیلتر دیگری ثبت شده بود؛ این بار به‌عنوان گزارش مستقل ذخیره شد.", "warn");
+  } else {
+    toast(verdict.action === "revision" ? "نسخه تازه گزارش نوبت‌دهی ثبت شد؛ آمار از همین نسخه ساخته می‌شود." : "گزارش نوبت‌دهی با موفقیت بارگذاری شد.", "ok");
+  }
+  renderDiagnostics(card.querySelector(".diag-slot"), diag);
+  renderFileDots();
+  renderActiveTab();
+}
+
+/* گزارش فعال را در STATE.sources.n بازتاب می‌دهد تا نشانگرهای بالای صفحه درست بمانند */
+function setActiveNobatSource() {
+  const active = activeNobatReport();
+  STATE.sources.n = active ? { records: active.records, diag: { fileName: active.fileName } } : null;
+}
+function activeNobatReport() {
+  const latest = latestPerScope(STATE.nobat.reports);
+  if (!latest.length) return null;
+  return latest.find((r) => r.scopeKey === STATE.nobat.activeScope) || latest[0];
+}
+
+/* ---------- بازیابی از IndexedDB هنگام باز شدن صفحه ----------
+   بازیابی همیشه ناهمگام است، پس ممکن است کاربر پیش از پایان آن فایلی را
+   بارگذاری کند؛ در این حالت گزارش تازه نباید با نتیجهٔ بازیابی پاک شود. */
+function loadNobatFromStore() {
+  STATE.nobat.ready = (async () => {
+    let rows = [];
+    try {
+      const got = await NobatStore.all();
+      rows = Array.isArray(got) ? got : [];
+      STATE.nobat.storeError = null;
+    } catch (e) {
+      STATE.nobat.storeError = e.message;
+    }
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    for (const r of STATE.nobat.reports) byId.set(r.id, r); // آنچه در حافظه است مقدم است
+    STATE.nobat.reports = Array.from(byId.values());
+    if (!STATE.nobat.activeScope) {
+      const newest = latestPerScope(STATE.nobat.reports)[0];
+      STATE.nobat.activeScope = newest ? newest.scopeKey : null;
+    }
+    setActiveNobatSource();
+    renderFileDots();
+    if (STATE.activeTab === "nobat") renderActiveTab();
+  })();
+  return STATE.nobat.ready;
+}
+
+/* ---------- رندر تب ---------- */
+function renderNobat() {
+  const body = document.getElementById("nobatBody");
+  const active = activeNobatReport();
+  if (!active) {
+    body.innerHTML = emptyState("برای این بخش، فایل «گزارش نوبت دهی» را در کارت «نوبت‌دهی و برنامه تعمیرات» بارگذاری کنید.", true);
+    wireEmptyStateButtons(body);
+    return;
+  }
+  const stats = computeNobatStats(active.records);
+  const scopes = latestPerScope(STATE.nobat.reports);
+  const revisions = revisionsOfScope(STATE.nobat.reports, active.scopeKey);
+  const storeWarning = STATE.nobat.storeError
+    ? `<div class="limit-note"><b>هشدار:</b> نگهداری محلی در دسترس نیست (${esc(STATE.nobat.storeError)}). گزارش‌ها با بستن یا تازه‌سازی صفحه از بین می‌روند.</div>`
+    : "";
+
+  body.innerHTML = storeWarning + `
+    <div class="scope-bar">
+      <label class="micro" for="nbScope">گزارش نمایش‌داده‌شده:</label>
+      <select id="nbScope">
+        ${scopes.map((r) => `<option value="${esc(r.scopeKey)}" ${r.scopeKey === active.scopeKey ? "selected" : ""}>${esc(nobatScopeLabel(r))}</option>`).join("")}
+      </select>
+      <span class="micro">نسخه ${fmtInt(active.revision)} · دریافت در هداکس: ${esc(fmtJalaliDateTime(active.receivedAt))}</span>
+    </div>
+
+    <div class="card" style="margin-bottom:14px;">
+      <h3 class="card-title">مشخصات دادهٔ نمایش‌داده‌شده</h3>
+      <table class="data-table small" style="white-space:normal;"><tbody>
+        <tr><td>تاریخ گزارش (شمسی)</td><td><b>${esc(active.dateKey)}</b>${active.dateLabel ? ` — ${esc(active.dateLabel)}` : ""}</td></tr>
+        <tr><td>فیلتر وضعیت مراجعه</td><td>${esc(active.statusFilter)}</td></tr>
+        <tr><td>سالن تعمیرات</td><td>${esc(active.hall)}</td></tr>
+        <tr><td>زمان ورود فایل به هداکس</td><td>${esc(fmtJalaliDateTime(active.receivedAt))}</td></tr>
+        <tr><td>نام فایل</td><td class="rev-file">${esc(active.fileName)}</td></tr>
+        <tr><td>شیت خوانده‌شده</td><td>${esc(active.sheetName || "—")}</td></tr>
+        <tr><td>شناسهٔ محتوای فایل</td><td class="rev-file">${esc(active.contentHash)}</td></tr>
+      </tbody></table>
+    </div>
+
+    <div class="grid12" style="margin-bottom:14px;">
+      ${kpiCard("تعداد ردیف‌های گزارش", { html: fmtInt(stats.rowCount) }, `<p class="micro">هر ردیف لزوماً یک پذیرش نیست.</p>`)}
+      ${kpiCard("کارت‌های پذیرش یکتا", { html: fmtInt(stats.uniqueCards) }, `<p class="micro">بر پایهٔ مقادیر غیرتکراری «شماره کارت».</p>`)}
+      ${kpiCard("ردیف‌های بدون شماره کارت", { html: fmtInt(stats.rowsWithoutCard) }, `<p class="micro">حذف نشده‌اند؛ می‌توانند پیش از پذیرش باشند.</p>`)}
+      ${kpiCard("نوبت‌های یکتا", { html: fmtInt(stats.uniqueTurns) }, `<p class="micro">فقط از ${fmtInt(stats.rowCount - stats.rowsWithoutTurn)} ردیف دارای «شماره نوبت».</p>`)}
+    </div>
+
+    <div class="limit-note">
+      <b>محدودیت‌های تفسیر این گزارش</b>
+      <ul>
+        <li>«زمان تقریبی ترخیص» یک تخمین است، نه زمان واقعی ترخیص؛ از این فایل به‌تنهایی میانگین زمان واقعی تعمیر یا پذیرش تا ترخیص محاسبه نمی‌شود.</li>
+        <li>سلول خالی به معنی صفر نیست؛ مقدار نامشخص جداگانه شمرده می‌شود و در میانگین‌گیری وارد نمی‌شود.</li>
+        <li>مقادیر ستون «جایگاه» در این خروجی شکل عددی دارند ولی جایگاه تعمیرگاهی نیستند؛ هیچ ظرفیت یا عملکردی بر پایهٔ آن محاسبه نشده است.</li>
+        <li>تاریخ بالا تاریخ خودِ گزارش است و جایگزین تاریخ واقعی پذیرش هر خودرو نمی‌شود.</li>
+        <li>گزارش‌های با تاریخ یا فیلتر متفاوت جدا نگهداری می‌شوند و با هم جمع نمی‌شوند.</li>
+      </ul>
+    </div>
+
+    <div class="card" style="margin-bottom:14px;">
+      <h3 class="card-title">توزیع وضعیت مراجعه</h3>
+      <div id="nbStatusChart"></div>
+    </div>
+    <div class="card" style="margin-bottom:14px;">
+      <h3 class="card-title">وضعیت مراجعه — جدول</h3>
+      <div id="nbStatusTable"></div>
+    </div>
+    <div class="card" style="margin-bottom:14px;">
+      <h3 class="card-title">ردیف‌های گزارش</h3>
+      <div id="nbRowsTable"></div>
+    </div>
+    <div class="card">
+      <h3 class="card-title">نسخه‌های ثبت‌شده برای همین تاریخ و فیلترها</h3>
+      <ul class="rev-list">
+        ${revisions.map((r) => `<li>
+            ${r.id === active.id ? badge("نسخه فعال", "ok") : badge("نسخه قبلی", "warn")}
+            <span>نسخه ${fmtInt(r.revision)}</span>
+            <span>${fmtInt(r.rowCount)} ردیف</span>
+            <span>${esc(fmtJalaliDateTime(r.receivedAt))}</span>
+            <span class="rev-file">${esc(r.fileName)}</span>
+          </li>`).join("")}
+      </ul>
+      <p class="micro">آمار بالا همیشه از آخرین نسخهٔ موفق ساخته می‌شود؛ نسخه‌های قبلی فقط برای سابقه نگه داشته می‌شوند.</p>
+    </div>`;
+
+  document.getElementById("nbScope").addEventListener("change", (e) => {
+    STATE.nobat.activeScope = e.target.value;
+    setActiveNobatSource();
+    renderFileDots();
+    renderNobat();
+  });
+
+  renderVBarChart(document.getElementById("nbStatusChart"), stats.statusRows.map((r) => r.label), stats.statusRows.map((r) => r.count), { color: "var(--teal)" });
+
+  buildTable(document.getElementById("nbStatusTable"), {
+    exportName: "نوبت‌دهی-وضعیت-مراجعه-" + active.dateKey,
+    rows: stats.statusRows, defaultSort: "count", defaultSortDir: "desc",
+    searchKeys: ["label"],
+    getCell: (r, k) => r[k],
+    columns: [
+      { key: "label", label: "وضعیت مراجعه" },
+      { key: "count", label: "تعداد ردیف", numeric: true, render: (r) => fmtInt(r.count) },
+      { key: "share", label: "سهم از ردیف‌ها", numeric: true, render: (r) => (r.share * 100).toFixed(1) + "٪" },
+      { key: "uniqueCards", label: "کارت یکتا", numeric: true, render: (r) => fmtInt(r.uniqueCards) },
+      { key: "rowsWithoutCard", label: "بدون شماره کارت", numeric: true, render: (r) => fmtInt(r.rowsWithoutCard) },
+    ],
+  });
+
+  const dash = (v) => (v ? esc(v) : '<span class="micro">—</span>');
+  buildTable(document.getElementById("nbRowsTable"), {
+    exportName: "نوبت‌دهی-ردیف‌ها-" + active.dateKey,
+    rows: active.records, pageSize: 50,
+    searchKeys: ["cardNo", "turnNo", "plate", "customer", "vehicle", "visitStatus", "stopReason"],
+    getCell: (r, k) => r[k],
+    columns: [
+      { key: "cardNo", label: "شماره کارت", render: (r) => r.cardNo ? esc(r.cardNo) : badge("بدون کارت", "warn") },
+      { key: "turnNo", label: "شماره نوبت", render: (r) => dash(r.turnNo) },
+      { key: "plate", label: "پلاک", render: (r) => dash(r.plate) },
+      { key: "customer", label: "نام مشتری", render: (r) => dash(r.customer) },
+      { key: "vehicle", label: "نوع خودرو", render: (r) => dash(r.vehicle) },
+      { key: "visitStatus", label: "وضعیت مراجعه", render: (r) => dash(r.visitStatus) },
+      { key: "channel", label: "کانال ثبت نوبت", render: (r) => dash(r.channel) },
+      { key: "slot", label: "جایگاه (خام)", render: (r) => dash(r.slot) },
+      { key: "stopReason", label: "علت توقف", render: (r) => dash(r.stopReason) },
+      { key: "stopDuration", label: "مدت زمان توقف", render: (r) => dash(r.stopDuration) },
+      { key: "receptionTime", label: "زمان پذیرش", render: (r) => dash(r.receptionTime) },
+      { key: "estClearTime", label: "زمان تقریبی ترخیص", render: (r) => dash(r.estClearTime) },
+      { key: "mechanic", label: "مکانیکی", render: (r) => dash(r.mechanic) },
+      { key: "electric", label: "برق", render: (r) => dash(r.electric) },
+      { key: "steering", label: "فرمان و جلوبندی", render: (r) => dash(r.steering) },
+      { key: "cng", label: "CNG", render: (r) => dash(r.cng) },
+      { key: "bodyPaint", label: "صافکاری و نقاشی", render: (r) => dash(r.bodyPaint) },
+      { key: "callUp", label: "فراخوان", render: (r) => dash(r.callUp) },
+    ],
+  });
+}
+
+/* ============================================================
    آپلود فایل‌ها
    ============================================================ */
 function initUploads() {
@@ -2577,6 +3229,7 @@ function initUploads() {
     ["dragleave", "drop"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); card.classList.remove("drag"); }));
     drop.addEventListener("drop", (e) => { const f = e.dataTransfer.files[0]; if (f) handleFileUpload(id, f); });
     card.querySelector(".btn-reupload").addEventListener("click", () => {
+      if (id === "n") { resetUploadCard(id); renderFileDots(); renderActiveTab(); return; } // گزارش‌های ذخیره‌شده پاک نمی‌شوند
       STATE.sources[id] = null; recomputeDerived(); resetUploadCard(id); renderFileDots(); renderActiveTab();
     });
   });
@@ -2592,6 +3245,11 @@ function resetUploadCard(id) {
   card.querySelector('input[type="file"]').value = "";
 }
 async function handleFileUpload(sourceId, file) {
+  if (sourceId === "n") {
+    // تاریخ و محدودهٔ گزارش باید پیش از پردازش مشخص شود؛ داخل فایل وجود ندارد.
+    openNobatMetaModal(file, (meta) => handleNobatUpload(file, meta), () => resetUploadCard("n"));
+    return;
+  }
   const card = document.getElementById("upcard-" + sourceId);
   const progress = card.querySelector(".progress-bar"), progressBar = progress.querySelector("div");
   const statusEl = card.querySelector(".upload-status");
@@ -2682,8 +3340,8 @@ function initWeightControls() {
 /* ============================================================
    ناوبری تب‌ها، تم، چاپ/خروجی، راه‌اندازی
    ============================================================ */
-const TAB_RENDERERS = { dashboard: renderDashboard, priority: renderPriority, slow: renderSlow, emdad: renderEmdad, oil: renderOil, reception: renderReception };
-const TAB_TITLES = { dashboard: "داشبورد", priority: "اولویت سفارش‌گذاری", slow: "کندگردش و راکد", emdad: "امداد ویژه", oil: "روغن و فیلتر", reception: "پذیرش تا ترخیص" };
+const TAB_RENDERERS = { dashboard: renderDashboard, priority: renderPriority, slow: renderSlow, emdad: renderEmdad, oil: renderOil, reception: renderReception, nobat: renderNobat };
+const TAB_TITLES = { dashboard: "داشبورد", priority: "اولویت سفارش‌گذاری", slow: "کندگردش و راکد", emdad: "امداد ویژه", oil: "روغن و فیلتر", reception: "پذیرش تا ترخیص", nobat: "نوبت‌دهی و برنامه تعمیرات" };
 
 function switchTab(tab) {
   STATE.activeTab = tab;
@@ -2727,6 +3385,8 @@ function initApp() {
   recomputeDerived();
   initShell();
   renderActiveTab();
+  // گزارش‌های نوبت‌دهی ذخیره‌شده را بازیابی کن (با تازه‌سازی صفحه پاک نمی‌شوند)
+  loadNobatFromStore();
 }
 document.addEventListener("DOMContentLoaded", initApp);
 

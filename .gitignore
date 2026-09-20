@@ -1,0 +1,38 @@
+# --- داده‌های واقعی نمایندگی: هرگز وارد مخزن نشوند ---
+# خروجی‌های اکسل سامانه (موجودی، گردش، امداد، پذیرش، نوبت‌دهی)
+*.xls
+*.xlsx
+*.xlsm
+*.xlsb
+*.csv
+*.tsv
+
+# پایگاه دادهٔ محلی و خروجی‌های گرفته‌شده از داشبورد
+*.sqlite
+*.sqlite3
+*.db
+/data/
+/exports/
+/downloads/
+
+# --- رمزها و توکن‌ها ---
+.env
+.env.*
+*.pem
+*.key
+*.pfx
+secrets.json
+credentials.json
+.netrc
+
+# --- ابزار و سیستم ---
+node_modules/
+npm-debug.log*
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.tmp
+*.bak
+*~
