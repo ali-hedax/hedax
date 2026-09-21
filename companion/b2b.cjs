@@ -96,6 +96,7 @@ class B2BClient {
       throw failure('B2B_UNAVAILABLE', 'دریافت از B2B کامل نشد. اتصال، ورود و صفحهٔ گزارش را بررسی کنید؛ گزارش قبلی حفظ شده است.');
     } finally { this.busy = false; }
   }
+  async report(input) { return require('./operations.cjs').runOperation(this,input,selectReportValue); }
   async close() { if (this.context) await this.context.close(); }
 }
 module.exports = {B2BClient, validateScope, selectReportValue, STATUS, HALLS};

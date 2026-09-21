@@ -17,7 +17,7 @@ function createServer({client, port=5173, root=ROOT} = {}) {
       if (req.headers['sec-fetch-site'] === 'cross-site') return json(res,403,{message:'Cross-site rejected'});
       const url = new URL(req.url,'http://localhost:' + port);
       if (req.method === 'GET' && url.pathname === '/api/b2b/session') return json(res,200,{token,version:1});
-      if (req.method === 'POST' && ['/api/b2b/sync','/api/b2b/login'].includes(url.pathname)) {
+      if (req.method === 'POST' && ['/api/b2b/sync','/api/b2b/login','/api/b2b/report'].includes(url.pathname)) {
         if (req.headers['x-hedax-token'] !== token || !origins.has(req.headers.origin)) return json(res,403,{message:'Request rejected'});
         if (!(req.headers['content-type'] || '').startsWith('application/json')) return json(res,415,{message:'JSON required'});
         let body = ''; for await (const chunk of req) { body += chunk; if (body.length > 4096) return json(res,413,{message:'Request too large'}); }
@@ -26,6 +26,7 @@ function createServer({client, port=5173, root=ROOT} = {}) {
           const scope = validateScope(input);
           return json(res,200,await client.sync(scope));
         }
+        if(url.pathname.endsWith('/report')) return json(res,200,await client.report(require('./operations.cjs').validateOperation(input)));
         return json(res,200,await client.login());
       }
       if (req.method === 'GET' && ['/', '/index.html', '/index%20(4).html'].includes(url.pathname)) {

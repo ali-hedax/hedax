@@ -329,6 +329,7 @@ button, select, input { font-family: inherit; }
 .rev-list li { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
 .rev-list li:last-child { border-bottom: 0; }
 .rev-list .rev-file { color: var(--muted); word-break: break-all; }
+.ops-panel{margin:16px 0}.ops-source{padding:10px 0;border-bottom:1px solid var(--border)}.ops-controls{display:flex;flex-wrap:wrap;align-items:center;gap:12px}.ops-controls input:not([type=checkbox]),.ops-controls select,.ops-controls button{min-height:44px}.ops-controls strong{margin-inline-end:auto}.ops-panel .muted-note{margin:8px 0}.ops-panel button{min-height:40px}
 </style>
 </head>
 <body>
@@ -865,7 +866,7 @@ function mapColumnsByName(headerRow, fieldDefs) {
   }
   // مرحله ۲: تطابق جزئی، فقط برای فیلدهای بی‌نتیجه و ستون‌های مصرف‌نشده
   for (const f of fieldDefs) {
-    if (map[f.key] > -1) continue;
+    if (map[f.key] > -1 || f.exactName) continue;
     for (const syn of f.synonyms) {
       const ns = normKey(syn);
       if (ns.length < 3) continue;
@@ -947,7 +948,15 @@ const SOURCE_DEFS = {
   },
   t: {
     id: "t", title: "پذیرش تا ترخیص", fileHint: "paziresh",
+    strictNames: true,
     fields: [
+      { key: "admissionDate", label: "تاریخ پذیرش", synonyms: ["تاريخ پذيرش", "تاریخ پذیرش"], required: false },
+      { key: "plate", label: "پلاک", synonyms: ["پلاک", "شماره پلاک"], text: true },
+      { key: "admissionNotes", label: "توضیحات پذیرش", synonyms: ["توضيحات پذيرش", "توضیحات پذیرش"], text: true },
+      { key: "performedServices", label: "خدمات انجام‌شده", synonyms: ["شرح خدمات انجام شده", "شرح تعمیرات انجام شده", "خدمات انجام شده", "عملیات انجام شده"], text: true },
+      { key: "serviceKind", label: "نوع خدمت", synonyms: ["نوع خدمت", "نوع خدمات"], text: true },
+      { key: "workCompleted", label: "خدمات انجام شده است", synonyms: ["خدمات انجام شده است", "اتمام تعمیرات"], text: true },
+      { key: "repairEndedAt", label: "تاریخ پایان تعمیرات", synonyms: ["تاریخ پایان تعمیرات", "تاریخ و زمان پایان تعمیرات"], text: true },
       { key: "cardNo", label: "شماره کارت پذیرش", synonyms: ["شماره کارت پذيرش", "شماره کارت پذیرش"], required: true },
       { key: "createdAt", label: "تاریخ و زمان ایجاد", synonyms: ["تاريخ و زمان ايجاد", "تاریخ و زمان ایجاد"], required: true },
       { key: "clearedDate", label: "تاریخ ترخیص", synonyms: ["تاريخ ترخيص", "تاریخ ترخیص"], required: false },
@@ -989,6 +998,8 @@ const SOURCE_DEFS = {
     ],
   },
 };
+
+SOURCE_DEFS.t.fields.forEach(f => { f.exactName = true; });
 
 function classifyTurnover(raw) {
   const n = norm(raw);
@@ -2807,62 +2818,111 @@ function renderOil() {
 /* ============================================================
    تب ۶: پذیرش تا ترخیص
    ============================================================ */
-function renderReception() {
-  const body = document.getElementById("receptionBody");
-  const S = STATE.sources;
-  if (!S.t) { body.innerHTML = emptyState("برای این گزارش به فایل «پذیرش تا ترخیص» (paziresh) نیاز است.", true); wireEmptyStateButtons(body); return; }
-
-  const rows = S.t.records.map((t) => {
-    const created = parseFlexDate(t.createdAt);
-    const clearedD = parseFlexDate(t.clearedDate, t.clearedTime);
-    let hours = null, needsFollowup = false;
-    if (created.valid && clearedD.valid) {
-      hours = (clearedD.minutes - created.minutes) / 60;
-      if (hours < 0 || hours > 8) needsFollowup = true;
-    } else needsFollowup = true;
-    return { t, created, cleared: clearedD, hours, needsFollowup };
-  });
-  const validHours = rows.filter((r) => r.hours !== null && r.hours >= 0).map((r) => r.hours);
-  const avgH = meanOf(validHours), medH = medianOf(validHours);
-  const followupCount = rows.filter((r) => r.needsFollowup).length;
-
-  const byReceptionist = new Map();
-  rows.forEach((r) => { const name = r.t.receptionist || "نامشخص"; if (!byReceptionist.has(name)) byReceptionist.set(name, []); byReceptionist.get(name).push(r); });
-  const recNames = Array.from(byReceptionist.keys());
-  const recCounts = recNames.map((n) => byReceptionist.get(n).length);
-
-  body.innerHTML = `<div class="grid12" style="margin-bottom:14px;">
-      ${kpiCard("تعداد پذیرش", { html: fmtInt(rows.length) })}
-      ${kpiCard("میانگین زمان پذیرش تا ترخیص", { html: isFinite(avgH) ? avgH.toFixed(1) + " ساعت" : "—" })}
-      ${kpiCard("میانه زمان پذیرش تا ترخیص", { html: isFinite(medH) ? medH.toFixed(1) + " ساعت" : "—" })}
-      ${kpiCard("نیازمند پیگیری", { html: fmtInt(followupCount) })}
-    </div>
-    <div class="card" style="margin-bottom:14px;"><h3 class="card-title">تعداد پذیرش به تفکیک پذیرشگر</h3><div id="recByStaff"></div></div>
-    <div class="card"><div id="receptionTable"></div></div>`;
-
-  renderVBarChart(document.getElementById("recByStaff"), recNames, recCounts, { color: "var(--teal)" });
-
-  buildTable(document.getElementById("receptionTable"), {
-    exportName: "پذیرش-تا-ترخیص",
-    rows, defaultSort: "hours", defaultSortDir: "desc",
-    searchKeys: ["t.cardNo", "t.receptionist", "t.productDesc"],
-    getCell: (r, k) => {
-      switch (k) {
-        case "cardNo": return r.t.cardNo; case "receptionist": return r.t.receptionist; case "hall": return r.t.hall;
-        case "productDesc": return r.t.productDesc; case "hours": return r.hours; case "status": return r.needsFollowup ? "نیازمند پیگیری" : "عادی";
-        case "amount": return r.t.finalAmount;
-        default: return "";
-      }
-    },
-    columns: [
-      { key: "cardNo", label: "شماره کارت" }, { key: "receptionist", label: "پذیرشگر" }, { key: "hall", label: "سالن" },
-      { key: "productDesc", label: "محصول" },
-      { key: "hours", label: "مدت (ساعت)", numeric: true, render: (r) => r.hours === null ? '<span class="micro">نامعتبر</span>' : r.hours.toFixed(1) },
-      { key: "status", label: "وضعیت", render: (r) => r.needsFollowup ? badge("نیازمند پیگیری", "danger") : badge("عادی", "ok") },
-      { key: "amount", label: "مبلغ نهایی", numeric: true, render: (r) => fmtInt(r.t.finalAmount) },
-    ],
-  });
+function receptionDate(value, time) {
+  if (!value) return {valid:false};
+  const d=parseFlexDate(value,time);
+  if(!d.valid || d.jm<1 || d.jm>12 || d.jd<1 || d.jd>31 || d.hh>23 || d.mm>59) return {valid:false};
+  const check=JAL.d2j(d.jdn);
+  return check.jy===d.jy && check.jm===d.jm && check.jd===d.jd ? d : {valid:false};
 }
+function receptionServiceKind(records, basis='performed') {
+  const clean=s=>norm(s).replace(/\u200c/g,' ').replace(/\s+/g,' ').trim();
+  const notes=records.map(r=>clean(r.customerNotes)+' '+clean(r.admissionNotes)).join(' ');
+  const actual=records.map(r=>clean(r.performedServices)).filter(Boolean).join(' ');
+  const confirmed=records.some(r=>/^(بله|انجام شده|تکمیل شده|true|1)$/i.test(clean(r.workCompleted)) || receptionDate(r.repairEndedAt).valid);
+  const text=basis==='requested' ? notes : actual || (confirmed ? records.map(r=>clean(r.serviceKind)).join(' ') : '');
+  if(!text.trim()) return {kind:'unknown',evidence:false};
+  // A negated request/service must not become a completed repair.
+  if(/عدم |انجام نشد|تعویض نشد|نیاز نیست/.test(text)) return {kind:'unknown',evidence:true};
+  const service=/سرویس\s*(دوره|روغن)|تعویض\s*روغن|روغن\s*(موتور|گیربکس)|فیلتر\s*(روغن|هوا)|بازدید\s*دوره/.test(text);
+  const repair=/تعمیر|مکانیک|برق|صافکاری|نقاشی|جلوبندی|میزان فرمان|عیب یابی|دیسک|لنت|کلاچ|تسمه|کمک فنر|استارت|دینام|رادیاتور/.test(text);
+  return {kind:service&&repair?'both':service?'service':repair?'repair':'other',evidence:true};
+}
+function computeReceptionStats(records, dateKey, basis='performed') {
+  const asOf=receptionDate(dateKey), grouped=new Map();
+  let missingCards=0;
+  records.forEach(r=>{
+    const card=textCell(r.cardNo), admission=receptionDate(r.admissionDate);
+    if(!card){missingCards++;return;}
+    const key=normKey(card)+'|'+(admission.valid?admission.jy:'undated');
+    if(!grouped.has(key)) grouped.set(key,[]); grouped.get(key).push(r);
+  });
+  const rows=Array.from(grouped.values()).map(group=>{
+    const r=group[0], dates=group.map(x=>receptionDate(x.admissionDate)).filter(x=>x.valid);
+    const days=new Set(dates.map(x=>x.jdn));
+    const admission=days.size===1?dates[0]:{valid:false};
+    const releases=group.map(x=>receptionDate(x.clearedDate,x.clearedTime)).filter(x=>x.valid).sort((a,b)=>b.minutes-a.minutes);
+    const release=releases[0]||{valid:false};
+    const status=group.map(x=>norm(x.status)).join(' ');
+    const cancelled=/انصراف|باطل|لغو/.test(status);
+    const released=/ترخیص شده|ترخيص شده|خارج شده/.test(status);
+    const active=/پذیرش|پذيرش|در حال|در صف|منتظر|متوقف|آماده ترخیص|آماده ترخيص|توقف/.test(status);
+    const dateConflict=release.valid&&admission.valid&&release.jdn<admission.jdn;
+    const before=admission.valid&&asOf.valid&&admission.jdn<asOf.jdn;
+    const historicalStillHere=release.valid&&!dateConflict&&release.jdn>asOf.jdn;
+    const stopped=before&&!cancelled&&!dateConflict&&(historicalStillHere||(!release.valid&&!released&&active));
+    const uncertainStop=before&&!cancelled&&!release.valid&&!active&&!released;
+    const names=[...new Set(group.map(x=>norm(x.receptionist)).filter(Boolean))];
+    const staff=names.length===1?names[0]:names.length?'اختلاف نام پذیرشگر':'نامشخص';
+    const created=receptionDate(r.createdAt), hours=created.valid&&release.valid&&release.minutes>=created.minutes?(release.minutes-created.minutes)/60:null;
+    return {raw:r,cardNo:textCell(r.cardNo),plate:textCell(r.plate),vehicle:r.productDesc||'',staff,status:r.status||'نامشخص',admission,release,cancelled,
+      stopped,uncertainStop,dateConflict:dateConflict||days.size>1,days:stopped?asOf.jdn-admission.jdn:null,hours,
+      service:receptionServiceKind(group,basis)};
+  });
+  const daily=rows.filter(r=>r.admission.valid&&asOf.valid&&r.admission.jdn===asOf.jdn);
+  const staffMap=new Map(); daily.forEach(r=>staffMap.set(r.staff,(staffMap.get(r.staff)||0)+1));
+  const serviceRows=daily.filter(r=>!r.cancelled), kinds=['repair','service','both','other','unknown'];
+  const kindCounts=Object.fromEntries(kinds.map(k=>[k,serviceRows.filter(r=>r.service.kind===k).length]));
+  const known=serviceRows.filter(r=>r.service.evidence).length;
+  const trend=[];
+  if(asOf.valid) for(let i=13;i>=0;i--){const day=asOf.jdn-i,j=JAL.d2j(day);trend.push({label:jalaliKey(j.jy,j.jm,j.jd),count:rows.filter(r=>r.admission.valid&&r.admission.jdn===day).length});}
+  const stopped=rows.filter(r=>r.stopped).sort((a,b)=>b.days-a.days);
+  const age=[{label:'۱ تا ۲ روز',count:stopped.filter(r=>r.days<=2).length},{label:'۳ تا ۷ روز',count:stopped.filter(r=>r.days>=3&&r.days<=7).length},{label:'۸ تا ۱۴ روز',count:stopped.filter(r=>r.days>=8&&r.days<=14).length},{label:'بیش از ۱۴ روز',count:stopped.filter(r=>r.days>14).length}];
+  return {rows,daily,stopped,staff:[...staffMap].map(([name,count])=>({name,count})),kindCounts,known,trend,age,
+    missingDates:rows.filter(r=>!r.admission.valid).length,conflicts:rows.filter(r=>r.dateConflict).length,uncertain:rows.filter(r=>r.uncertainStop).length,
+    missingCards,duplicateRows:records.length-missingCards-rows.length,cancelled:daily.filter(r=>r.cancelled).length};
+}
+function renderReception() {
+  const body=document.getElementById('receptionBody'), source=STATE.sources.t;
+  if(!source){body.innerHTML=emptyState('برای این گزارش، فایل «پذیرش تا ترخیص» را دریافت یا بارگذاری کنید.',true);wireEmptyStateButtons(body);return;}
+  const dateKey=STATE.receptionDay||operationsToday().dateKey, basis=STATE.receptionBasis||'performed';
+  const s=computeReceptionStats(source.records,dateKey,basis), kc=s.kindCounts;
+  const validHours=s.rows.filter(r=>!r.cancelled&&r.hours!==null).map(r=>r.hours),avgH=meanOf(validHours),medH=medianOf(validHours);
+  const serviceTitle=basis==='performed'?'خدمات انجام‌شده':'نوع مراجعه از توضیحات پذیرش';
+  const value=n=>s.known?fmtInt(n):'—';
+  const period=source.meta?('محدودهٔ گزارش: '+(source.meta.fromDate||source.meta.dateKey||'—')+' تا '+(source.meta.toDate||source.meta.dateKey||'—')+' · دریافت: '+fmtJalaliDateTime(source.meta.receivedAt)):'محدودهٔ زمانی فایل دستی تأیید نشده است؛ آمار فقط از ردیف‌های همین فایل ساخته می‌شود.';
+  body.innerHTML=`<div class="card" style="margin-bottom:16px"><div class="ops-controls">
+    <label for="recDay">روز گزارش <input id="recDay" inputmode="numeric" value="${esc(dateKey)}" style="width:140px"></label>
+    <button class="btn btn-ghost" id="recToday" type="button">امروز</button>
+    <label for="recBasis">مبنای تفکیک <select id="recBasis"><option value="performed" ${basis==='performed'?'selected':''}>خدمات انجام‌شده (قطعی)</option><option value="requested" ${basis==='requested'?'selected':''}>نوع مراجعه از توضیحات پذیرش</option></select></label>
+    </div><p class="muted-note">${esc(period)}</p><p class="muted-note">مبنای روزانه: تاریخ پذیرش و کارت یکتا در هر سال. جمع روز شامل انصرافی‌هاست؛ آمار خدمات و خودروهای متوقف، انصرافی‌ها را شامل نمی‌شود.</p>
+    <p class="muted-note">${s.missingDates?fmtInt(s.missingDates)+' کارت فاقد تاریخ پذیرش معتبر است. ':''}${s.conflicts?fmtInt(s.conflicts)+' کارت اختلاف تاریخ دارد. ':''}${s.uncertain?fmtInt(s.uncertain)+' کارت قدیمی وضعیت توقف نامشخص دارد. ':''}${s.duplicateRows?fmtInt(s.duplicateRows)+' ردیف تکراری در شمارش کارت‌ها یک‌بار شمرده شد.':''}</p></div>
+    <div class="grid12" style="margin-bottom:16px">
+    ${kpiCard('کل پذیرش ثبت‌شده در روز',{html:fmtInt(s.daily.length)},esc(dateKey))}
+    ${kpiCard('خودروهای مانده از روزهای قبل',{html:fmtInt(s.stopped.length)},'در محدودهٔ گزارش؛ پایان روز انتخاب‌شده')}
+    ${kpiCard('تعمیرات'+(basis==='performed'?' انجام‌شده':' درخواستی'),{html:value(kc.repair+kc.both)},'بدون انصرافی؛ شامل موارد تعمیر و سرویس مشترک')}
+    ${kpiCard('سرویس دوره‌ای و روغن',{html:value(kc.service+kc.both)},basis==='performed'?'خدمات ثبت‌شده':'تشخیص از متن؛ انجام خدمت را تأیید نمی‌کند')}
+    ${kpiCard('انصرافی روز',{html:fmtInt(s.cancelled)})}${kpiCard('نوع خدمت نامشخص',{html:fmtInt(kc.unknown)})}</div>
+    <div class="card" style="margin-bottom:16px"><h3 class="card-title">پذیرش به تفکیک پذیرشگر — ${esc(dateKey)}</h3><div class="grid12">${s.staff.map(x=>kpiCard(x.name,{html:fmtInt(x.count)})).join('')||'<p>پذیرشی برای این روز در فایل موجود نیست.</p>'}</div><div id="recByStaff"></div></div>
+    <div class="card" style="margin-bottom:16px"><h3 class="card-title">پذیرش روزانه در ۱۴ روز منتهی به روز انتخاب‌شده</h3><div id="recDailyChart"></div></div>
+    <div class="card" style="margin-bottom:16px"><h3 class="card-title">${esc(serviceTitle)}</h3><p class="muted-note">${basis==='performed'?'فقط ریز خدمات انجام‌شده یا نوع خدمت همراه تأیید اتمام، مبنای آمار قطعی است. شرح مشتری و ترخیص به‌تنهایی اثبات انجام تعمیر نیست.':'این نمودار از متن توضیحات پذیرش استخراج شده است و آمار قطعی خدمات انجام‌شده نیست.'} دو کارت بالای صفحه می‌توانند هم‌پوشان باشند؛ نمودار زیر گروه‌های جدا دارد.</p><div id="recServiceChart"></div></div>
+    <div class="card" style="margin-bottom:16px"><h3 class="card-title">خودروهای متوقف از روزهای قبل</h3><p class="muted-note">فاقد ترخیص تا پایان روز انتخاب‌شده و دارای وضعیت فعال؛ پذیرش‌های خارج از بازهٔ فایل و موارد نامشخص در این عدد نیستند.</p><div id="recStoppedChart"></div><div id="recStoppedTable"></div></div>
+    <div class="card"><h3 class="card-title">لیست پذیرش‌های روز</h3><div id="receptionTable"></div></div>
+    <div class="card" style="margin-top:16px"><h3 class="card-title">زمان ثبت تا ترخیص در کل گزارش</h3><div class="grid12">${kpiCard('میانگین زمان ثبت تا ترخیص',{html:validHours.length?avgH.toFixed(1)+' ساعت':'—'})}${kpiCard('میانه زمان ثبت تا ترخیص',{html:validHours.length?medH.toFixed(1)+' ساعت':'—'})}${kpiCard('نیازمند پیگیری زمانی',{html:fmtInt(s.rows.filter(r=>!r.cancelled&&(r.hours===null||r.hours>8)).length)})}</div><p class="muted-note">محاسبه از تاریخ و زمان ایجاد تا ترخیص واقعی؛ انصرافی‌ها حذف شده‌اند. زمان نامعتبر یا بیش از ۸ ساعت نیازمند پیگیری است.</p><div id="recAllTable"></div></div>`;
+  document.getElementById('recDay').addEventListener('change',e=>{const p=parseJalaliInput(e.target.value);if(!p.valid){toast(p.reason,'danger');return;}STATE.receptionDay=p.key;renderReception();});
+  document.getElementById('recToday').addEventListener('click',()=>{STATE.receptionDay=null;renderReception();});
+  document.getElementById('recBasis').addEventListener('change',e=>{STATE.receptionBasis=e.target.value;renderReception();});
+  renderVBarChart(document.getElementById('recByStaff'),s.staff.map(x=>x.name),s.staff.map(x=>x.count),{color:'var(--teal)'});
+  renderVBarChart(document.getElementById('recDailyChart'),s.trend.map(x=>x.label.slice(5)),s.trend.map(x=>x.count),{color:'var(--teal)'});
+  renderVBarChart(document.getElementById('recServiceChart'),['فقط تعمیرات','فقط سرویس و روغن','تعمیرات و سرویس','سایر خدمات','نامشخص'],['repair','service','both','other','unknown'].map(k=>kc[k]),{color:'var(--teal)'});
+  renderVBarChart(document.getElementById('recStoppedChart'),s.age.map(x=>x.label),s.age.map(x=>x.count),{color:'var(--danger)'});
+  const columns=[{key:'cardNo',label:'شماره کارت'},{key:'plate',label:'پلاک'},{key:'vehicle',label:'خودرو'},{key:'staff',label:'پذیرشگر'},{key:'admissionDay',label:'تاریخ پذیرش',render:r=>r.admission.valid?esc(jalaliKey(r.admission.jy,r.admission.jm,r.admission.jd)):'—'},{key:'status',label:'وضعیت'}];
+  const getCell=(r,k)=>k==='admissionDay'?(r.admission.valid?r.admission.jdn:0):r[k];
+  buildTable(document.getElementById('recStoppedTable'),{exportName:'خودروهای-متوقف',rows:s.stopped,columns:[...columns,{key:'days',label:'روز توقف',numeric:true}],searchKeys:['cardNo','plate','vehicle','staff'],getCell,defaultSort:'days',defaultSortDir:'desc'});
+  buildTable(document.getElementById('receptionTable'),{exportName:'پذیرش-روزانه',rows:s.daily,columns,searchKeys:['cardNo','plate','vehicle','staff'],getCell});
+  buildTable(document.getElementById('recAllTable'),{exportName:'پذیرش-تا-ترخیص',rows:s.rows,columns:[...columns,{key:'hours',label:'ثبت تا ترخیص (ساعت)',numeric:true,render:r=>r.hours===null?'—':r.hours.toFixed(1)},{key:'amount',label:'مبلغ نهایی',numeric:true,render:r=>fmtInt(r.raw.finalAmount)}],searchKeys:['cardNo','plate','vehicle','staff'],getCell:(r,k)=>k==='amount'?r.raw.finalAmount:getCell(r,k),defaultSort:'hours',defaultSortDir:'desc'});
+}
+
 
 /* ============================================================
    تب: نوبت‌دهی و برنامه تعمیرات
@@ -3231,7 +3291,7 @@ function initUploads() {
       <div class="progress-bar" style="display:none;"><div></div></div>
       <div class="upload-status" style="display:none;"></div>
       <div class="upload-actions" style="display:none;">
-        <button type="button" class="btn btn-ghost btn-sm btn-reupload">حذف و بارگذاری مجدد</button>
+        <button type="button" class="btn btn-ghost btn-sm btn-reupload">بارگذاری گزارش تازه</button>
       </div>
       <div class="diag-slot"></div>
     </div>`;
@@ -3247,7 +3307,7 @@ function initUploads() {
     drop.addEventListener("drop", (e) => { const f = e.dataTransfer.files[0]; if (f) handleFileUpload(id, f); });
     card.querySelector(".btn-reupload").addEventListener("click", () => {
       if (id === "n") { resetUploadCard(id); renderFileDots(); renderActiveTab(); return; } // گزارش‌های ذخیره‌شده پاک نمی‌شوند
-      STATE.sources[id] = null; recomputeDerived(); resetUploadCard(id); renderFileDots(); renderActiveTab();
+      resetUploadCard(id); renderFileDots(); renderActiveTab();
     });
   });
 }
@@ -3296,7 +3356,7 @@ async function handleFileUpload(sourceId, file) {
     toast("بارگذاری " + SOURCE_META[sourceId].label + " با خطا مواجه شد.", "danger");
   }
 }
-function finishUpload(sourceId, res, file, t0) {
+async function finishUpload(sourceId, res, file, t0) {
   const card = document.getElementById("upcard-" + sourceId);
   const progress = card.querySelector(".progress-bar"), progressBar = progress.querySelector("div");
   const statusEl = card.querySelector(".upload-status");
@@ -3304,7 +3364,8 @@ function finishUpload(sourceId, res, file, t0) {
   setTimeout(() => { progress.style.display = "none"; }, 250);
   const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
   if (res.ok) {
-    STATE.sources[sourceId] = { records: res.records, diag: res.diag };
+    try { STATE.sources[sourceId] = await OperationsSync.saveManual(sourceId,res.records,res.diag,file); }
+    catch { STATE.sources[sourceId] = { records:res.records,diag:res.diag }; toast("فایل خوانده شد ولی ذخیرهٔ محلی انجام نشد؛ با بستن صفحه ممکن است پاک شود.","warn"); }
     statusEl.style.display = "block"; statusEl.className = "upload-status success";
     statusEl.textContent = `${file.name} — ${fmtInt(res.records.length)} ردیف — ${elapsed} ثانیه`;
     card.querySelector(".upload-actions").style.display = "flex";
@@ -3361,6 +3422,7 @@ const TAB_RENDERERS = { dashboard: renderDashboard, priority: renderPriority, sl
 const TAB_TITLES = { dashboard: "داشبورد", priority: "اولویت سفارش‌گذاری", slow: "کندگردش و راکد", emdad: "امداد ویژه", oil: "روغن و فیلتر", reception: "پذیرش تا ترخیص", nobat: "نوبت‌دهی و برنامه تعمیرات" };
 
 function switchTab(tab) {
+  const enteringTab = STATE.activeTab !== tab;
   const enteringNobat = tab === "nobat" && STATE.activeTab !== "nobat";
   STATE.activeTab = tab;
   document.querySelectorAll(".nav-item").forEach((n) => n.classList.toggle("active", n.dataset.tab === tab));
@@ -3368,6 +3430,7 @@ function switchTab(tab) {
   document.getElementById("pageTitle").textContent = TAB_TITLES[tab];
   renderActiveTab();
   if (enteringNobat) B2BSync.onOpen();
+  if (enteringTab) OperationsSync.onOpen(tab);
 }
 function renderActiveTab() { (TAB_RENDERERS[STATE.activeTab] || renderDashboard)(); }
 
@@ -3404,6 +3467,7 @@ function initApp() {
   recomputeDerived();
   initShell();
   B2BSync.init();
+  OperationsSync.init();
   renderActiveTab();
   // گزارش‌های نوبت‌دهی ذخیره‌شده را بازیابی کن (با تازه‌سازی صفحه پاک نمی‌شوند)
   loadNobatFromStore();
@@ -3522,6 +3586,113 @@ async function importB2BReport(payload, expectedScope) {
   STATE.nobat.reports=existing.concat(report); STATE.nobat.activeScope=report.scopeKey;
   setActiveNobatSource(); renderFileDots(); renderActiveTab(); return {duplicate:false};
 }
+
+</script>
+<script>
+function operationsToday(now=new Date()) {
+  const p=new Intl.DateTimeFormat('en-US-u-ca-persian-nu-latn',{timeZone:'Asia/Tehran',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',hourCycle:'h23'}).formatToParts(now);
+  const get=t=>p.find(x=>x.type===t).value;
+  return {dateKey:get('year')+'/'+get('month')+'/'+get('day'),year:get('year'),month:get('month'),hour:Number(get('hour'))};
+}
+function operationsScope(sourceId,now=new Date()) {
+  const t=operationsToday(now);
+  if(sourceId==='alef') return {sourceId,dateKey:t.dateKey,warehouse:'انبار قطعات ولوازم یدکی'};
+  if(sourceId==='b') return {sourceId,dateKey:t.dateKey,year:t.year};
+  return {sourceId,fromDate:t.year+'/01/01',toDate:t.dateKey};
+}
+function operationDue(sourceId,source,now=new Date(),force=false) {
+  const t=operationsToday(now), meta=source&&source.meta;
+  if(sourceId==='p'&&t.hour<10) return {due:false,reason:'گزارش امداد ویژه از ساعت ۱۰ صبح به وقت تهران قابل دریافت است.'};
+  if(force||!meta||meta.origin!=='b2b')return {due:true};
+  if(!Number.isFinite(meta.receivedAt))return {due:true};
+  const last=operationsToday(new Date(meta.receivedAt));
+  if(['p','b'].includes(sourceId)&&last.year===t.year&&last.month===t.month)return {due:false,reason:'گزارش این ماه دریافت شده؛ به‌روزرسانی بعدی پس از شروع ماه جدید است.'};
+  return {due:true};
+}
+const SourceSnapshots=(()=>{
+  let opening=null;
+  function open(){if(opening)return opening;opening=new Promise((resolve,reject)=>{
+    if(!globalThis.indexedDB){reject(new Error('ذخیره‌سازی محلی در دسترس نیست.'));return;}
+    const r=indexedDB.open('hedax_source_snapshots',1);
+    r.onupgradeneeded=()=>{r.result.createObjectStore('sources',{keyPath:'sourceId'});};
+    r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);
+  });opening.catch(()=>opening=null);return opening;}
+  async function run(mode,fn){const db=await open();return new Promise((resolve,reject)=>{const tx=db.transaction('sources',mode),req=fn(tx.objectStore('sources'));tx.oncomplete=()=>resolve(req&&req.result);tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});}
+  return {all:()=>run('readonly',s=>s.getAll()),put:s=>run('readwrite',st=>st.put(s))};
+})();
+async function importOperationReport(payload,expectedScope) {
+  if(!payload||!payload.scope||Object.keys(payload.scope).length!==Object.keys(expectedScope).length||Object.entries(expectedScope).some(([k,v])=>payload.scope[k]!==v)||!Number.isFinite(payload.receivedAt))throw new Error('محدودهٔ گزارش دریافتی با درخواست یکسان نیست.');
+  const id=expectedScope.sourceId;
+  if(!['alef','b','p','t'].includes(id)||typeof payload.base64!=='string'||payload.base64.length>72*1024*1024)throw new Error('فایل گزارش نامعتبر است.');
+  const bytes=Uint8Array.from(atob(payload.base64),c=>c.charCodeAt(0));
+  const file=new File([bytes],payload.fileName||id+'.xlsx');
+  const res=await ingestFile(id,file);
+  if(!res.ok||res.needsManualMap)throw new Error('قالب گزارش شناسایی نشد؛ آخرین گزارش معتبر حفظ شد.');
+  // Real exports contain totals and incomplete rows. Preserve the raw grid and
+  // diagnostics, and make exclusions visible instead of silently hiding them.
+  if(!res.records.length&&res.diag.rejectedRowCount>0)throw new Error('هیچ ردیف معتبری شناسایی نشد؛ آخرین گزارش معتبر حفظ شد.');
+  const hash=await hashBytes(bytes.buffer), previous=STATE.sources[id];
+  const snapshot={sourceId:id,records:res.records,diag:res.diag,meta:{...expectedScope,receivedAt:payload.receivedAt,origin:'b2b',contentHash:hash,fileName:file.name}};
+  await SourceSnapshots.put(snapshot);
+  STATE.sources[id]=snapshot;renderOperationSnapshot(id);recomputeDerived();renderFileDots();renderActiveTab();
+  return {duplicate:!!(previous&&previous.meta&&previous.meta.contentHash===hash),count:res.records.length,excluded:res.diag.rejectedRowCount};
+}
+function renderOperationSnapshot(id) {
+  const s=STATE.sources[id],card=document.getElementById('upcard-'+id);if(!s||!card)return;
+  const status=card.querySelector('.upload-status');status.style.display='block';status.className='upload-status success';
+  status.textContent=fmtInt(s.records.length)+' ردیف معتبر'+(s.diag?.rejectedRowCount?' · '+fmtInt(s.diag.rejectedRowCount)+' ردیف ناقص یا جمع خارج از آمار':'');
+  card.querySelector('.upload-actions').style.display='flex';if(s.diag)renderDiagnostics(card.querySelector('.diag-slot'),s.diag);
+}
+const OperationsSync=(()=>{
+  const names={alef:'موجودی انبار',b:'DPLAN و گردش کالا',p:'امداد ویژه',t:'پذیرش تا ترخیص'};
+  const tabs={dashboard:['alef','b','p','t'],priority:['alef','b','p'],slow:['alef','b'],oil:['alef','b'],emdad:['p'],reception:['t']};
+  const messages={}, enabled={alef:true,b:true,p:true,t:true};
+  let token=null,queue=Promise.resolve(),pending=new Set(),initialized=false,ready=Promise.resolve(),clockKey='';
+  function show(id,msg){messages[id]=msg;document.querySelectorAll('[data-ops-status="'+id+'"]').forEach(el=>el.textContent=msg);}
+  function busy(id,value){document.querySelectorAll('[data-ops-refresh="'+id+'"]').forEach(el=>el.disabled=value);document.querySelectorAll('[data-ops-source="'+id+'"]').forEach(el=>el.setAttribute('aria-busy',String(value)));}
+  async function request(route,input){
+    if(!token){const r=await fetch('/api/b2b/session',{cache:'no-store',signal:AbortSignal.timeout(5000)});if(!r.ok)throw new Error('همراه محلی را با start-hedax.cmd اجرا کنید.');token=(await r.json()).token;}
+    const r=await fetch('/api/b2b/'+route,{method:'POST',headers:{'Content-Type':'application/json','X-Hedax-Token':token},body:JSON.stringify(input),signal:AbortSignal.timeout(240000)});
+    const result=await r.json();if(!r.ok){if(r.status===403)token=null;throw Object.assign(new Error(result.message||'دریافت ناموفق بود.'),{code:result.code});}return result;
+  }
+  function sync(id,force=false){
+    if(pending.has(id))return queue;
+    pending.add(id);busy(id,true);show(id,'در صف دریافت…');
+    queue=queue.catch(()=>{}).then(async()=>{
+      await ready;
+      const due=operationDue(id,STATE.sources[id],new Date(),force);
+      if(!due.due){show(id,due.reason);return;}
+      const scope=operationsScope(id);
+      show(id,'در حال دریافت '+names[id]+'… گزارش قبلی تا پایان دریافت حفظ می‌شود.');
+      const payload=await request('report',scope),result=await importOperationReport(payload,scope);
+      show(id,(result.duplicate?'محتوا تغییری نداشت. ':'گزارش دریافت و ذخیره شد. ')+fmtInt(result.count)+' ردیف · '+fmtJalaliDateTime(payload.receivedAt)+(result.excluded?' · '+fmtInt(result.excluded)+' ردیف ناقص یا جمع در آمار نیست؛ جزئیات ورودی را بررسی کنید.':''));
+    }).catch(e=>show(id,(e.name==='TimeoutError'?'زمان دریافت طولانی شد؛ دوباره تلاش کنید.':e.message)+' آخرین دادهٔ معتبر حفظ شده است.')).finally(()=>{pending.delete(id);busy(id,false);});
+    return queue;
+  }
+  function mount(){
+    Object.entries(tabs).forEach(([tab,ids])=>{
+      const parent=document.getElementById('tab-'+tab);if(!parent||parent.querySelector('.ops-panel'))return;
+      const panel=document.createElement('section');panel.className='card ops-panel';panel.setAttribute('aria-label','دریافت گزارش‌های B2B');
+      panel.innerHTML='<h3 class="card-title">دریافت گزارش‌های B2B</h3>'+ids.map(id=>'<div class="ops-source" data-ops-source="'+id+'"><div class="ops-controls"><strong>'+names[id]+'</strong><label><input type="checkbox" data-ops-auto="'+id+'" '+(enabled[id]?'checked':'')+'> خودکار</label><button type="button" class="btn btn-ghost btn-sm" data-ops-refresh="'+id+'">به‌روزرسانی اکنون</button></div><p class="muted-note" role="status" aria-live="polite" data-ops-status="'+id+'"></p></div>').join('')+'<button type="button" class="btn btn-ghost btn-sm ops-login">ورود به B2B</button>';
+      parent.insertBefore(panel,parent.querySelector('[id$="Body"]')||parent.children[2]||null);
+      panel.querySelectorAll('[data-ops-refresh]').forEach(el=>el.addEventListener('click',()=>sync(el.dataset.opsRefresh,true)));
+      panel.querySelectorAll('[data-ops-auto]').forEach(el=>el.addEventListener('change',()=>{const id=el.dataset.opsAuto;enabled[id]=el.checked;document.querySelectorAll('[data-ops-auto="'+id+'"]').forEach(x=>x.checked=el.checked);try{localStorage.setItem('hedax-ops-enabled',JSON.stringify(enabled));}catch{};}));
+      panel.querySelector('.ops-login').addEventListener('click',()=>request('login',{}).then(r=>ids.forEach(id=>show(id,r.message))).catch(e=>ids.forEach(id=>show(id,e.message))));
+    });
+    // The upload icons get the same source-specific one-click action.
+    Object.keys(names).forEach(id=>{const card=document.getElementById('upcard-'+id);if(!card||card.querySelector('[data-ops-refresh]'))return;const button=document.createElement('button');button.className='btn btn-ghost btn-sm';button.type='button';button.dataset.opsRefresh=id;button.textContent='دریافت از B2B';button.addEventListener('click',()=>sync(id,true));card.appendChild(button);});
+    Object.keys(names).forEach(id=>{const meta=STATE.sources[id]&&STATE.sources[id].meta;show(id,messages[id]||(meta?'آخرین دریافت: '+fmtJalaliDateTime(meta.receivedAt):['p','b'].includes(id)?'از ابتدای سال؛ به‌روزرسانی خودکار پس از تغییر ماه'+(id==='p'?'، از ساعت ۱۰ صبح':''):'با بازشدن بخش، دریافت می‌شود.'));});
+  }
+  function onOpen(tab){if(!initialized)return;for(const id of tabs[tab]||[])if(enabled[id])void sync(id);}
+  function init(){if(initialized)return;initialized=true;try{Object.assign(enabled,JSON.parse(localStorage.getItem('hedax-ops-enabled')||'{}'));}catch{}
+    ready=SourceSnapshots.all().then(rows=>{rows.forEach(s=>{if(!STATE.sources[s.sourceId])STATE.sources[s.sourceId]=s;renderOperationSnapshot(s.sourceId);});recomputeDerived();renderFileDots();renderActiveTab();}).catch(()=>{});
+    mount();ready.then(()=>{mount();onOpen(STATE.activeTab);});
+    const tick=()=>{const t=operationsToday(),key=t.dateKey+'|'+(t.hour>=10);if(key!==clockKey){const initial=!clockKey;clockKey=key;if(!initial){if(STATE.activeTab==='reception'&&!STATE.receptionDay)renderReception();onOpen(STATE.activeTab);}}};
+    tick();setInterval(tick,60000);
+  }
+  async function saveManual(id,records,diag,file){await ready;const snapshot={sourceId:id,records,diag,meta:{origin:'manual',fileName:file.name,receivedAt:Date.now()}};await SourceSnapshots.put(snapshot);return snapshot;}
+  return {init,onOpen,sync,saveManual};
+})();
 
 </script>
 </body>

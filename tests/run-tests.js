@@ -241,7 +241,7 @@ async function main() {
   ok("منبع «امداد ویژه» دست‌نخورده", !!app.SOURCE_DEFS.p && app.SOURCE_DEFS.p.fields.some((f) => f.key === "date" && f.required));
   ok("منبع «پذیرش تا ترخیص» دست‌نخورده", !!app.SOURCE_DEFS.t && app.SOURCE_DEFS.t.fields.some((f) => f.key === "cardNo" && f.required));
   ok("منبع نوبت‌دهی مستقل است و به «پذیرش تا ترخیص» تبدیل نشده",
-    app.SOURCE_DEFS.n.id === "n" && app.SOURCE_DEFS.n.fields.length === 18 && app.SOURCE_DEFS.t.fields.length === 10);
+    app.SOURCE_DEFS.n.id === "n" && app.SOURCE_DEFS.n.fields.length === 18 && app.SOURCE_DEFS.t !== app.SOURCE_DEFS.n && app.SOURCE_DEFS.t.fields.some(f=>f.key==='createdAt'));
   ok("هیچ ستونی در نوبت‌دهی باعث حذف ردیف نمی‌شود", app.SOURCE_DEFS.n.fields.every((f) => !f.required));
   ok("کارت‌های شناسایی نوع فایل تعریف شده‌اند", app.mapRequiredFields(app.SOURCE_DEFS.n).length === 3);
 
