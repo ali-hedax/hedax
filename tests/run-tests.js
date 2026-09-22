@@ -201,6 +201,8 @@ async function main() {
     const ctx = app.__context;
     const realDoc = ctx.document;
     ctx.document = makeDocument(["fileDots", "nobatBody"]);
+    const previousTab = app.STATE.activeTab;
+    app.STATE.activeTab = "nobat"; // This fixture covers the nobat view; dashboard has its own browser suite.
     try {
       // گزارشی که کاربر پیش از پایان بازیابی بارگذاری کرده است
       app.STATE.nobat.reports = [rep3];
@@ -227,6 +229,7 @@ async function main() {
         ctx.document.__el("nobatBody").innerHTML.includes("نگهداری محلی در دسترس نیست"));
     } finally {
       ctx.document = realDoc;
+      app.STATE.activeTab = previousTab;
       app.STATE.nobat.reports = [];
       app.STATE.nobat.activeScope = null;
       app.STATE.nobat.storeError = null;

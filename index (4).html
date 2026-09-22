@@ -330,6 +330,8 @@ button, select, input { font-family: inherit; }
 .rev-list li:last-child { border-bottom: 0; }
 .rev-list .rev-file { color: var(--muted); word-break: break-all; }
 .ops-panel{margin:16px 0}.ops-source{padding:10px 0;border-bottom:1px solid var(--border)}.ops-controls{display:flex;flex-wrap:wrap;align-items:center;gap:12px}.ops-controls input:not([type=checkbox]),.ops-controls select,.ops-controls button{min-height:44px}.ops-controls strong{margin-inline-end:auto}.ops-panel .muted-note{margin:8px 0}.ops-panel button{min-height:40px}
+.management-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.management-heading h2{margin:0;font-size:22px}.management-heading .card-title{margin:0}.management-day{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0}.management-day input{min-height:44px;max-width:150px;background:var(--surface-2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px;font:inherit}.management-kpis,.management-charts,.management-summary{margin-bottom:18px}.management-charts{margin-top:18px}.management-charts .management-heading{margin-bottom:16px}.management-data{margin-top:20px}.management-sources{display:grid;gap:8px;margin:14px 0}.management-source{padding:10px;border-inline-start:3px solid var(--warn);font-size:12px}.management-source.loaded{border-color:var(--teal)}details>summary{cursor:pointer;min-height:44px;font-weight:700;line-height:1.8}details>summary:focus-visible{outline:2px solid var(--teal);outline-offset:4px}.management-heading button,.management-day button{min-height:44px}
+@media print{#managementOverview button,.management-charts button,.management-data,.ops-panel,#b2bSyncPanel{display:none!important}.management-charts>.card{break-inside:avoid}.management-summary{break-before:page}}
 </style>
 </head>
 <body>
@@ -344,7 +346,7 @@ button, select, input { font-family: inherit; }
     <span class="page-title" id="pageTitle">داشبورد</span>
     <div class="topbar-spacer"></div>
     <div class="file-dots" id="fileDots"></div>
-    <button type="button" class="icon-btn" id="btnExportXlsx" title="خروجی CSV جدول فعال (Excel)"></button>
+    <button type="button" class="icon-btn" id="btnExportXlsx" title="خروجی Excel گزارش فعال"></button>
     <button type="button" class="icon-btn" id="btnPrint" title="چاپ / خروجی PDF"></button>
     <button type="button" class="icon-btn" id="btnTheme" title="تغییر تم روشن/تیره"></button>
   </header>
@@ -363,11 +365,19 @@ button, select, input { font-family: inherit; }
     <!-- تب ۱: داشبورد -->
     <section class="tab-panel active" id="tab-dashboard">
       <h1 class="section-title">داشبورد مدیریتی</h1>
-      <p class="section-sub">نمای کلی وضعیت انبار، سفارش‌گذاری و امداد ویژه</p>
+      <p class="section-sub">تصویر مدیریتی پذیرش، تعمیرگاه، موجودی و تأمین قطعه</p>
+      <div id="managementOverview"></div>
 
-      <div class="grid12" id="uploadGrid" style="margin-bottom:18px;"></div>
       <div class="grid12" id="kpiGrid" style="margin-bottom:18px;"></div>
       <div class="grid12" id="dashCharts"></div>
+      <div id="managementChartsHost"></div>
+      <div id="managementSummaryHost"></div>
+      <details class="card management-data no-print" id="managementData">
+        <summary>داده‌های مبنای تحلیل، دریافت B2B و ورود فایل</summary>
+        <div id="managementSourceStatus" class="management-sources"></div>
+        <div id="managementSyncSlot"></div>
+        <div class="grid12" id="uploadGrid" style="margin-bottom:18px;"></div>
+      </details>
       <div class="grid12" style="margin-top:16px;">
         <div class="col-12 card">
           <h3 class="card-title">تنظیم وزن‌های فرمول امتیاز اولویت سفارش</h3>
@@ -415,8 +425,11 @@ button, select, input { font-family: inherit; }
     <section class="tab-panel" id="tab-nobat">
       <h1 class="section-title">نوبت‌دهی و برنامه تعمیرات</h1>
       <p class="section-sub">گزارش نوبت‌دهی روزانه — هر گزارش با تاریخ و محدودهٔ خودش نگهداری می‌شود</p>
-      <section id="b2bSyncPanel" aria-label="دریافت خودکار از B2B" style="border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:18px">
-        <h2 style="font-size:18px;margin:0 0 12px">دریافت از B2B ایساکو</h2>
+
+
+      <div id="nobatBody"></div>
+      <details class="no-print" id="b2bSyncPanel" aria-label="دریافت خودکار از B2B" style="border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:18px">
+        <summary>به‌روزرسانی دادهٔ نوبت‌دهی از B2B</summary>
         <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:center;margin-bottom:12px">
           <label><input id="b2bAuto" type="checkbox" checked> دریافت خودکار با بازشدن این بخش</label>
           <label><input id="b2bToday" type="checkbox" checked> گزارش امروز</label>
@@ -430,9 +443,7 @@ button, select, input { font-family: inherit; }
         </div>
         <p id="b2bMessage" role="status" aria-live="polite">در اولین اتصال، ورود را در پنجرهٔ B2B انجام دهید. پس از پایان اعتبار ورود، ورود دوباره لازم است.</p>
         <p class="muted-note">تنها گزارش دریافت می‌شود. آخرین دادهٔ معتبر تا پایان دریافت و ذخیرهٔ گزارش جدید باقی می‌ماند.</p>
-      </section>
-
-      <div id="nobatBody"></div>
+      </details>
     </section>
   </main>
 </div>
@@ -1429,7 +1440,7 @@ function buildTable(container, opts) {
       <label class="table-pagesize">ردیف در صفحه:
         <select>${[25, 50, 100, 200].map((n) => `<option value="${n}" ${n === state.pageSize ? "selected" : ""}>${n}</option>`).join("")}</select>
       </label>
-      <button type="button" class="btn btn-ghost btn-sm btn-export-table">خروجی CSV این جدول (Excel)</button>
+      <button type="button" class="btn btn-ghost btn-sm btn-export-table">خروجی Excel این جدول</button>
     </div>`;
   container.appendChild(toolbar);
   const scrollWrap = document.createElement("div"); scrollWrap.className = "table-scroll";
@@ -2106,7 +2117,7 @@ function emptyState(message, needList) {
   </div>`;
 }
 function wireEmptyStateButtons(container) {
-  container.querySelectorAll(".btn-goto-upload").forEach((b) => b.addEventListener("click", () => switchTab("dashboard")));
+  container.querySelectorAll(".btn-goto-upload").forEach((b) => b.addEventListener("click", openManagementData));
 }
 
 /* ---------- KPI ---------- */
@@ -2122,13 +2133,14 @@ function kpiCard(label, value, footHtml) {
    تب ۱: داشبورد
    ============================================================ */
 function renderDashboard() {
+  renderManagementOverview();
   const S = STATE.sources, d = STATE.derived;
   const kpiGrid = document.getElementById("kpiGrid");
   const chartsHost = document.getElementById("dashCharts");
 
   if (!S.alef && !S.b && !S.p) {
     kpiGrid.innerHTML = "";
-    chartsHost.innerHTML = `<div class="col-12 card">${emptyState("برای دیدن گزارش‌های داشبورد، حداقل یکی از فایل‌ها را بارگذاری کنید.")}</div>`;
+    chartsHost.innerHTML = "";
     return;
   }
 
@@ -2182,16 +2194,19 @@ function renderDashboard() {
     </div>`;
   chartsHost.innerHTML = chartsHtml;
 
-  if (S.alef && S.b) {
-    const levels = ["تند گردش", "متوسط گردش", "کند گردش", "راکد"];
+  if (S.b) {
+    const levels = ["تند گردش", "متوسط گردش", "کند گردش", "راکد", "نامشخص"];
+    if(!S.alef) for(const b of S.b.records) countByLevel[classifyTurnover(b.turnover)]++;
+    const chartMode = !S.alef && STATE.dashChartMode === "value" ? "count" : STATE.dashChartMode;
     const colors = { "تند گردش": "var(--ok)", "متوسط گردش": "var(--gold)", "کند گردش": "var(--warn)", "راکد": "var(--danger)" };
     const totalCount = levels.reduce((a, l) => a + countByLevel[l], 0) || 1;
     let values, format;
-    if (STATE.dashChartMode === "count") { values = levels.map((l) => countByLevel[l]); format = (v) => fmtInt(v); }
-    else if (STATE.dashChartMode === "percent") { values = levels.map((l) => (countByLevel[l] / totalCount) * 100); format = (v) => v.toFixed(1) + "٪"; }
+    if (chartMode === "count") { values = levels.map((l) => countByLevel[l]); format = (v) => fmtInt(v); }
+    else if (chartMode === "percent") { values = levels.map((l) => (countByLevel[l] / totalCount) * 100); format = (v) => v.toFixed(1) + "٪"; }
     else { values = levels.map((l) => valueByLevel[l]); format = (v) => fmtRial(v); }
     // رنگ هر میله بر اساس سطح سلامت گردش (تند=سالم .. راکد=بحرانی)
-    renderBarChart(document.getElementById("turnoverChart"), levels, [{ name: "سطح گردش", values, color: "var(--teal)", format, barColor: (i) => colors[levels[i]] }], { legend: false, leftLabelW: 100 });
+    renderBarChart(document.getElementById("turnoverChart"), levels, [{ name: "سطح گردش", values, color: "var(--teal)", format, barColor: (i) => colors[levels[i]] || "var(--muted)" }], { legend: false, leftLabelW: 100 });
+    if(!S.alef) document.getElementById("turnoverChart").insertAdjacentHTML('beforeend','<p class="micro">تعداد اقلام DPLAN نمایش داده شده؛ ارزش ریالی به فایل موجودی نیاز دارد.</p>');
     document.querySelectorAll("#dashModeChips .chip").forEach((c) => c.addEventListener("click", () => { STATE.dashChartMode = c.dataset.mode; renderDashboard(); }));
   } else {
     document.getElementById("turnoverChart").innerHTML = emptyState("برای این نمودار به فایل‌های «موجودی و قیمت انبار» و «گردش و سفارش‌گذاری» نیاز است.", true);
@@ -3135,6 +3150,7 @@ function loadNobatFromStore() {
     setActiveNobatSource();
     renderFileDots();
     if (STATE.activeTab === "nobat") renderActiveTab();
+    else if (STATE.activeTab === "dashboard") renderManagementOverview();
   })();
   return STATE.nobat.ready;
 }
@@ -3672,9 +3688,9 @@ const OperationsSync=(()=>{
   function mount(){
     Object.entries(tabs).forEach(([tab,ids])=>{
       const parent=document.getElementById('tab-'+tab);if(!parent||parent.querySelector('.ops-panel'))return;
-      const panel=document.createElement('section');panel.className='card ops-panel';panel.setAttribute('aria-label','دریافت گزارش‌های B2B');
-      panel.innerHTML='<h3 class="card-title">دریافت گزارش‌های B2B</h3>'+ids.map(id=>'<div class="ops-source" data-ops-source="'+id+'"><div class="ops-controls"><strong>'+names[id]+'</strong><label><input type="checkbox" data-ops-auto="'+id+'" '+(enabled[id]?'checked':'')+'> خودکار</label><button type="button" class="btn btn-ghost btn-sm" data-ops-refresh="'+id+'">به‌روزرسانی اکنون</button></div><p class="muted-note" role="status" aria-live="polite" data-ops-status="'+id+'"></p></div>').join('')+'<button type="button" class="btn btn-ghost btn-sm ops-login">ورود به B2B</button>';
-      parent.insertBefore(panel,parent.querySelector('[id$="Body"]')||parent.children[2]||null);
+      const panel=document.createElement('details');panel.className='card ops-panel no-print';panel.setAttribute('aria-label','دریافت گزارش‌های B2B');
+      panel.innerHTML='<summary>به‌روزرسانی داده‌های مبنای تحلیل از B2B</summary>'+ids.map(id=>'<div class="ops-source" data-ops-source="'+id+'"><div class="ops-controls"><strong>'+names[id]+'</strong><label><input type="checkbox" data-ops-auto="'+id+'" '+(enabled[id]?'checked':'')+'> خودکار</label><button type="button" class="btn btn-ghost btn-sm" data-ops-refresh="'+id+'">به‌روزرسانی اکنون</button></div><p class="muted-note" role="status" aria-live="polite" data-ops-status="'+id+'"></p></div>').join('')+'<button type="button" class="btn btn-ghost btn-sm ops-login">ورود به B2B</button>';
+      if(tab==='dashboard')document.getElementById('managementSyncSlot').appendChild(panel);else parent.appendChild(panel);
       panel.querySelectorAll('[data-ops-refresh]').forEach(el=>el.addEventListener('click',()=>sync(el.dataset.opsRefresh,true)));
       panel.querySelectorAll('[data-ops-auto]').forEach(el=>el.addEventListener('change',()=>{const id=el.dataset.opsAuto;enabled[id]=el.checked;document.querySelectorAll('[data-ops-auto="'+id+'"]').forEach(x=>x.checked=el.checked);try{localStorage.setItem('hedax-ops-enabled',JSON.stringify(enabled));}catch{};}));
       panel.querySelector('.ops-login').addEventListener('click',()=>request('login',{}).then(r=>ids.forEach(id=>show(id,r.message))).catch(e=>ids.forEach(id=>show(id,e.message))));
@@ -3687,12 +3703,106 @@ const OperationsSync=(()=>{
   function init(){if(initialized)return;initialized=true;try{Object.assign(enabled,JSON.parse(localStorage.getItem('hedax-ops-enabled')||'{}'));}catch{}
     ready=SourceSnapshots.all().then(rows=>{rows.forEach(s=>{if(!STATE.sources[s.sourceId])STATE.sources[s.sourceId]=s;renderOperationSnapshot(s.sourceId);});recomputeDerived();renderFileDots();renderActiveTab();}).catch(()=>{});
     mount();ready.then(()=>{mount();onOpen(STATE.activeTab);});
-    const tick=()=>{const t=operationsToday(),key=t.dateKey+'|'+(t.hour>=10);if(key!==clockKey){const initial=!clockKey;clockKey=key;if(!initial){if(STATE.activeTab==='reception'&&!STATE.receptionDay)renderReception();onOpen(STATE.activeTab);}}};
+    const tick=()=>{const t=operationsToday(),key=t.dateKey+'|'+(t.hour>=10);if(key!==clockKey){const initial=!clockKey;clockKey=key;if(!initial){if(STATE.activeTab==='reception'&&!STATE.receptionDay)renderReception();if(STATE.activeTab==='dashboard'&&!STATE.managementDay)renderDashboard();onOpen(STATE.activeTab);}}};
     tick();setInterval(tick,60000);
   }
   async function saveManual(id,records,diag,file){await ready;const snapshot={sourceId:id,records,diag,meta:{origin:'manual',fileName:file.name,receivedAt:Date.now()}};await SourceSnapshots.put(snapshot);return snapshot;}
   return {init,onOpen,sync,saveManual};
 })();
+
+</script>
+<script>
+/* Managerial overview consumes the same normalized sources as the detailed tabs. */
+function managementMetrics(sources, derived, dateKey) {
+  const reception=sources.t?computeReceptionStats(sources.t.records,dateKey,'performed'):null;
+  const nobat=sources.n?computeNobatStats(sources.n.records):null;
+  const orders=sources.b?(derived?.scores||[]).filter(r=>r.shortfall>0).slice().sort((a,b)=>b.score-a.score||b.shortfall-a.shortfall):null;
+  const slow=sources.b?sources.b.records.filter(b=>['کند گردش','راکد'].includes(classifyTurnover(b.turnover))):null;
+  let slowValue=0,slowMatched=0;const priced=new Set();
+  for(const b of slow||[]){const a=derived?.resolver?.resolve(b.code,b.desc).alef;
+    if(a&&Number.isFinite(a.stock)&&Number.isFinite(a.sellPrice)){slowMatched++;if(!priced.has(a)){priced.add(a);slowValue+=a.stock*a.sellPrice;}}
+  }
+  const oil=sources.b?sources.b.records.filter(b=>isOilOrFilter(b.desc)):null;
+  const oilShort=orders?orders.filter(r=>isOilOrFilter(r.b.desc)):null;
+  const lastDate=sources.t?sources.t.records.map(r=>receptionDate(r.admissionDate)).filter(d=>d.valid).sort((a,b)=>b.jdn-a.jdn)[0]:null;
+  const emdad=sources.p?monthlyEmdadSeries(sources.p.records,'all'):null;
+  return {dateKey,reception,nobat,orders,slow,slowValue:slowMatched?slowValue:null,slowMatched,oil,oilShort,lastDate,emdad};
+}
+function managementSummaryRows(m,sources) {
+  const r=m.reception,k=r?.kindCounts,scope='روز '+m.dateKey+'؛ در محدودهٔ فایل پذیرش';
+  const rows=[
+    {indicator:'پذیرش ثبت‌شده',value:r?r.daily.length:null,scope,action:'reception'},
+    {indicator:'خودروهای مانده از روزهای قبل',value:r?r.stopped.length:null,scope,action:'reception'},
+    {indicator:'تعمیرات انجام‌شده',value:r?.known?k.repair+k.both:null,scope,action:'reception'},
+    {indicator:'سرویس و روغن انجام‌شده',value:r?.known?k.service+k.both:null,scope,action:'reception'},
+    {indicator:'نوع خدمت نامشخص',value:r?k.unknown:null,scope,action:'reception'},
+    {indicator:'اقلام دارای کسری سفارش',value:m.orders?.length??null,scope:'آخرین گزارش DPLAN؛ پس از کسر موجودی در راه',action:'priority'},
+    {indicator:'اقلام کندگردش و راکد',value:m.slow?.length??null,scope:'آخرین گزارش DPLAN',action:'slow'},
+    {indicator:'ارزش موجودی کندگردش و راکد (ریال)',value:m.slowValue,scope:'قیمت فروش انبار؛ فقط اقلام تطبیق‌یافته، نه بهای تمام‌شده',action:'slow'},
+    {indicator:'اقلام روغن و فیلتر دارای کسری',value:m.oilShort?.length??null,scope:'آخرین گزارش DPLAN',action:'oil'},
+    {indicator:'رویدادهای امداد ویژه',value:sources.p?.records.length??null,scope:'کل محدودهٔ فایل امداد؛ تعداد ردیف معتبر',action:'emdad'},
+    {indicator:'ردیف‌های نوبت‌دهی بدون کارت',value:m.nobat?.rowsWithoutCard??null,scope:'گزارش نوبت‌دهی انتخاب‌شده؛ پذیرش قطعی نیست',action:'nobat'},
+  ];
+  if(r)for(const person of r.staff)rows.push({indicator:'پذیرشگر: '+person.name,value:person.count,scope,action:'reception'});
+  return rows;
+}
+function openManagementData(){switchTab('dashboard');const panel=document.getElementById('managementData');if(panel){panel.open=true;panel.scrollIntoView({block:'start',behavior:'smooth'});}}
+function renderManagementOverview() {
+  const host=document.getElementById('managementOverview');if(!host)return;
+  const S=STATE.sources,day=STATE.managementDay||operationsToday().dateKey,m=managementMetrics(S,STATE.derived,day),r=m.reception;
+  const display=n=>n===null||n===undefined?'—':fmtInt(n);
+  const link=(tab,title)=>'<button class="btn btn-ghost btn-sm" type="button" data-management-tab="'+tab+'">'+esc(title)+'</button>';
+  const foot=text=>'<p class="micro">'+esc(text)+'</p>';
+  const missing=(name)=>'<p class="muted-note">برای این تحلیل، دادهٔ '+esc(name)+' لازم است. دریافت‌نشدن داده به معنی صفر نیست.</p><button class="btn btn-ghost btn-sm" type="button" data-management-data>دریافت یا انتخاب فایل</button>';
+  const latest=m.lastDate?jalaliKey(m.lastDate.jy,m.lastDate.jm,m.lastDate.jd):'';
+  const lastReport=activeNobatReport();
+  host.innerHTML=`<div class="management-heading"><div><h2>کنترل نمایندگی</h2><p class="muted-note">پذیرش، توقف خودرو و اقدام‌های مربوط به قطعه — از آخرین گزارش‌های ذخیره‌شده</p></div><button type="button" class="btn btn-ghost" data-management-data>مدیریت داده‌ها و اتصال B2B</button></div>
+    <div class="management-day no-print"><label for="managementDay">روز تحلیل پذیرش</label><input id="managementDay" inputmode="numeric" value="${esc(day)}"><button class="btn btn-ghost btn-sm" id="managementToday" type="button">امروز</button>${latest&&latest!==day?'<button class="btn btn-ghost btn-sm" id="managementLatest" type="button">آخرین روز موجود: '+esc(latest)+'</button>':''}</div>
+    <p class="muted-note">${r?'آمار پذیرش برای '+esc(day)+' است. آخرین تاریخ پذیرش موجود در فایل: '+esc(latest||'نامشخص')+'. خودروهای خارج از بازهٔ فایل در شمارش توقف نیستند.':'دادهٔ پذیرش هنوز موجود نیست؛ شاخص‌های آن تا دریافت فایل نامشخص می‌مانند.'}</p>
+    <div class="grid12 management-kpis">
+      ${kpiCard('پذیرش ثبت‌شده در روز',{html:display(r?.daily.length)},foot('کارت یکتا؛ شامل انصرافی‌ها'))}
+      ${kpiCard('مانده از روزهای قبل',{html:display(r?.stopped.length)},foot('فاقد ترخیص تا پایان روز؛ در محدودهٔ فایل'))}
+      ${kpiCard('اقلام دارای کسری سفارش',{html:display(m.orders?.length)},foot('موجودی در راه در محاسبه لحاظ شده است'))}
+      ${kpiCard('ارزش موجودی کندگردش و راکد',{html:m.slowValue===null?'—':esc(fmtRial(m.slowValue))},foot('به قیمت فروش؛ '+display(m.slowMatched)+' از '+display(m.slow?.length)+' قلم تطبیق‌یافته'))}
+    </div>
+    <div class="grid12 management-charts">
+      <section class="col-6 card"><div class="management-heading"><h3 class="card-title">روند پذیرش در ۱۴ روز</h3>${link('reception','جدول پذیرش‌ها')}</div><div id="mgReceptionTrend">${r?'':missing('پذیرش تا ترخیص')}</div></section>
+      <section class="col-6 card"><div class="management-heading"><h3 class="card-title">عملکرد پذیرشگران در روز انتخاب‌شده</h3>${link('reception','جزئیات هر پذیرشگر')}</div><div id="mgStaff">${r?'':missing('پذیرش تا ترخیص')}</div></section>
+      <section class="col-6 card"><div class="management-heading"><h3 class="card-title">خودروهای متوقف؛ اولویت پیگیری بر اساس مدت</h3>${link('reception','لیست خودروهای متوقف')}</div><div id="mgStopped">${r?'':missing('پذیرش تا ترخیص')}</div><p class="micro">توقف بیش از ۱۴ روز: ${display(r?r.age[3].count:null)} خودرو؛ وضعیت توقف نامشخص: ${display(r?.uncertain)}</p></section>
+      <section class="col-6 card"><div class="management-heading"><h3 class="card-title">تعمیرات و سرویس انجام‌شده</h3>${link('reception','تفکیک خدمات')}</div><div id="mgServices">${!r?missing('پذیرش تا ترخیص'):!r.known?'<p class="muted-note">گزارش فعلی انجام تعمیرات یا سرویس را تأیید نمی‌کند؛ '+display(r.kindCounts.unknown)+' پذیرش غیرانصرافی نوع خدمت نامشخص دارد. توضیحات مشتری فقط در نمای جداگانهٔ «نوع مراجعه» قابل تحلیل است.</p>':''}</div></section>
+      <section class="col-6 card"><div class="management-heading"><h3 class="card-title">۵ قلم دارای کسری با بالاترین اولویت سفارش</h3>${link('priority','بررسی و خروجی سفارش')}</div><div id="mgOrders">${m.orders?'':missing('DPLAN')}</div><p class="micro">طول میله، کسری قطعه است؛ ترتیب بر اساس امتیاز امداد، مصرف و کسری تعیین می‌شود.</p></section>
+      <section class="col-6 card"><div class="management-heading"><h3 class="card-title">کالاهای کندگردش و راکد</h3>${link('slow','لیست و مقایسهٔ قیمت')}</div><div id="mgSlow">${m.slow?'':missing('DPLAN')}</div><p class="micro">برای تصمیم دربارهٔ آزادکردن موجودی، مقدار موجودی و ارزش هر قلم را در فهرست بررسی کنید.</p></section>
+      <section class="col-6 card"><div class="management-heading"><h3 class="card-title">فروش ماهانهٔ روغن و فیلتر</h3>${link('oil','تحلیل روغن و فیلتر')}</div><p class="micro">${display(m.oil?.length)} قلم؛ ${display(m.oilShort?.length)} قلم دارای کسری. تعداد فروش قطعه معادل تعداد خودروهای سرویس‌شده نیست.</p><div id="mgOil">${m.oil?'':missing('DPLAN')}</div></section>
+      <section class="col-6 card"><div class="management-heading"><h3 class="card-title">وضعیت نوبت‌دهی و صف تعمیرگاه</h3>${link('nobat','تفکیک وضعیت‌ها')}</div><p class="micro">${lastReport?esc(nobatScopeLabel(lastReport)):'محدودهٔ گزارش نوبت‌دهی هنوز مشخص نیست.'} · ${display(m.nobat?.rowsWithoutCard)} ردیف بدون کارت؛ پذیرش قطعی محسوب نمی‌شود.</p><div id="mgNobat">${m.nobat?'':missing('نوبت‌دهی')}</div></section>
+    </div>
+    <section class="card management-summary"><h3 class="card-title">خلاصهٔ مدیریتی قابل خروجی</h3><p class="micro">هر شاخص با محدودهٔ خودش صادر می‌شود؛ تاریخ انتخاب‌شده فقط شاخص‌های پذیرش را تغییر می‌دهد. گزارش‌های موجودی، گردش و امداد محدودهٔ مستقل دارند.</p><div id="mgSummaryTable"></div></section>`;
+  document.getElementById('managementChartsHost').replaceChildren(host.querySelector('.management-charts'));
+  document.getElementById('managementSummaryHost').replaceChildren(host.querySelector('.management-summary'));
+  const bars=(id,labels,values)=>renderBarChart(document.getElementById(id),labels,[{name:'تعداد',values,color:'var(--teal)',format:fmtInt}],{legend:false});
+  if(r){renderLineChart(document.getElementById('mgReceptionTrend'),r.trend.map(x=>x.label.slice(5)),[{name:'پذیرش ثبت‌شده',values:r.trend.map(x=>x.count),color:'var(--teal)'}],{legend:false});
+    if(r.staff.length)bars('mgStaff',r.staff.map(x=>x.name),r.staff.map(x=>x.count));else document.getElementById('mgStaff').innerHTML=foot('برای این روز در فایل پذیرشی ثبت نشده است.');
+    bars('mgStopped',r.age.map(x=>x.label),r.age.map(x=>x.count));
+    if(r.known)bars('mgServices',['فقط تعمیرات','فقط سرویس و روغن','تعمیرات و سرویس','سایر خدمات','نامشخص'],['repair','service','both','other','unknown'].map(k=>r.kindCounts[k]));}
+  if(m.orders){const top=m.orders.slice(0,5);if(top.length)bars('mgOrders',top.map(x=>textCell(x.b.code)+' — '+(x.b.desc||'')),top.map(x=>x.shortfall));else document.getElementById('mgOrders').innerHTML=foot('در گزارش موجود کسری از نقطهٔ سفارش شناسایی نشد.');}
+  if(m.slow)bars('mgSlow',['کند گردش','راکد'],['کند گردش','راکد'].map(k=>m.slow.filter(b=>classifyTurnover(b.turnover)===k).length));
+  if(m.oil)renderLineChart(document.getElementById('mgOil'),JMONTHS,[{name:'فروش قطعه',values:JMONTHS.map((_,i)=>m.oil.reduce((sum,b)=>sum+(Number.isFinite(b['s'+(i+1)])?b['s'+(i+1)]:0),0)),color:'var(--gold)'}],{legend:false});
+  if(m.nobat)bars('mgNobat',m.nobat.statusRows.map(x=>x.label),m.nobat.statusRows.map(x=>x.count));
+  buildTable(document.getElementById('mgSummaryTable'),{exportName:'خلاصه-مدیریتی-'+day,rows:managementSummaryRows(m,S),columns:[{key:'indicator',label:'شاخص مدیریتی'},{key:'value',label:'مقدار',numeric:true,render:x=>x.value===null?'نامشخص':fmtInt(x.value)},{key:'scope',label:'محدوده و مبنای محاسبه'}],searchKeys:['indicator','scope'],getCell:(x,k)=>x[k]});
+  document.getElementById('tab-dashboard').querySelectorAll('[data-management-tab]').forEach(b=>b.addEventListener('click',()=>{if(b.dataset.managementTab==='reception')STATE.receptionDay=day;switchTab(b.dataset.managementTab);}));
+  document.getElementById('tab-dashboard').querySelectorAll('[data-management-data]').forEach(b=>b.addEventListener('click',openManagementData));
+  document.getElementById('managementDay').addEventListener('change',e=>{const p=parseJalaliInput(e.target.value);if(!p.valid){toast(p.reason,'danger');return;}STATE.managementDay=p.key;renderDashboard();});
+  document.getElementById('managementToday').addEventListener('click',()=>{STATE.managementDay=null;renderDashboard();});
+  document.getElementById('managementLatest')?.addEventListener('click',()=>{STATE.managementDay=latest;renderDashboard();});
+  renderManagementSourceStatus();
+}
+function renderManagementSourceStatus(){
+  const host=document.getElementById('managementSourceStatus');if(!host)return;
+  host.innerHTML=Object.entries(SOURCE_META).map(([id,def])=>{const s=STATE.sources[id],meta=s?.meta;
+    const report=id==='n'?activeNobatReport():null;
+    const range=meta?.fromDate?meta.fromDate+' تا '+meta.toDate:meta?.dateKey||report?.dateKey||'محدودهٔ فایل دستی';
+    return '<span class="management-source '+(s?'loaded':'')+'">'+esc(def.label)+' · '+(s?fmtInt(s.records.length)+' ردیف · '+esc(range)+(meta?.receivedAt?' · دریافت '+esc(fmtJalaliDateTime(meta.receivedAt)):''):'داده موجود نیست')+'</span>';
+  }).join('');
+}
 
 </script>
 </body>
