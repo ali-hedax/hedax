@@ -26,11 +26,12 @@ check('all four sources restored',Object.values(STATE.sources).filter(Boolean).l
 STATE.managementDay='1405/06/30';STATE.receptionDay='1405/06/30';recomputeDerived();switchTab('dashboard');
 check('management metrics visible',document.getElementById('managementOverview').textContent.includes('مانده از روزهای قبل'));
 check('stock chart retained',document.getElementById('turnoverChart').children.length>0);
-for(const id of ['mgReceptionTrend','mgStaff','mgStopped','mgServices','mgOrders','mgSlow','mgOil','mgNobat','emdadTrendMini'])check('populated '+id,document.getElementById(id).querySelector('svg,.hbar-chart')!==null);
+for(const id of ['mgMonthlyFlow','mgReceptionTrend','mgStaff','mgStopped','mgServices','mgOrders','mgSlow','mgOil','mgNobat','emdadTrendMini'])check('populated '+id,document.getElementById(id).querySelector('svg,.hbar-chart')!==null);
 check('summary export exists',document.querySelector('#mgSummaryTable .btn-export-table')!==null);
 const realDownload=triggerBlobDownload;let exported;triggerBlobDownload=(blob,name)=>{exported={blob,name};};document.querySelector('#mgSummaryTable .btn-export-table').click();await new Promise(r=>setTimeout(r,100));triggerBlobDownload=realDownload;check('managerial Excel generated',exported?.name.endsWith('.xlsx')&&exported.blob.size>0);const exportedSheets=await parseXlsxNative(await exported.blob.arrayBuffer());check('export contains adviser breakdown',exportedSheets[0].rows.some(row=>row.some(cell=>String(cell).includes('پذیرشگر:'))));
 check('data controls collapsed',!document.getElementById('managementData').open);
 for(const [tab,id] of [['priority','priorityTable'],['slow','slowTable'],['emdad','emdadTable'],['oil','oilTable'],['reception','receptionTable']]){switchTab(tab);check('populated detailed '+tab,document.getElementById(id).querySelectorAll('tbody tr').length>0);check('B2B controls below analysis '+tab,!!(document.getElementById(id).compareDocumentPosition(document.querySelector('#tab-'+tab+' .ops-panel'))&Node.DOCUMENT_POSITION_FOLLOWING));}
+for(const tab of ['dashboard','priority','slow','emdad','oil','reception','nobat']){switchTab(tab);const bar=document.querySelector('#tab-'+tab+' .ops-quick');check('visible B2B toolbar '+tab,!!bar&&bar.offsetHeight>0&&bar.querySelectorAll('button').length>=2);}
 switchTab('dashboard');document.getElementById('managementDay').value='1405/06/28';document.getElementById('managementDay').dispatchEvent(new Event('change'));check('date changes admission metrics',managementMetrics(STATE.sources,STATE.derived,STATE.managementDay).reception.daily.length===1);
 document.getElementById('managementLatest').click();check('latest file date works',STATE.managementDay==='1405/06/30');
 const keep={...STATE.sources};STATE.sources={t:keep.t};recomputeDerived();renderDashboard();check('reception-only dashboard still renders chart',!!document.querySelector('#mgStaff .hbar-chart'));check('missing stock not zero',document.querySelector('#managementOverview .kpi-value').textContent.trim()!=='—');
@@ -41,6 +42,6 @@ http.createServer((req,res)=>{
  const id=req.url?.startsWith('/fixture/')?req.url.slice(9):null;if(id&&books[id]){res.end(books[id]);return;}
  if(req.url!=='/'&&req.url!=='/test'){res.writeHead(404);res.end();return;}
  let html=fs.readFileSync(path.join(__dirname,'../index (4).html'),'utf8');
- html=html.replace('</head>','<script>localStorage.setItem("hedax-ops-enabled",JSON.stringify({alef:false,b:false,p:false,t:false}));</script></head>');
+ html=html.replace('</head>','<script>localStorage.setItem("hedax-ops-enabled",JSON.stringify({alef:false,b:false,p:false,t:false}));localStorage.setItem("hedax-b2b-settings",JSON.stringify({enabled:false}));</script></head>');
  html=html.replace('</body>',code+'</body>');res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'});res.end(html);
 }).listen(Number(process.env.HEDAX_TEST_PORT||5178),'127.0.0.1',()=>console.log('Synthetic management preview ready'));

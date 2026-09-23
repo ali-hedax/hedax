@@ -32,7 +32,7 @@ test('Tehran 10 AM gate, monthly refresh and fiscal year rollover match server s
  assert.throws(()=>validateOperation(a.ops.operationsScope('p',before),before),{code:'REPORT_NOT_READY'});
  const source={meta:{origin:'b2b',receivedAt:now.valueOf()}};
  assert.equal(a.ops.operationDue('p',source,now).due,false);assert.equal(a.ops.operationDue('b',source,now).due,false);
- assert.equal(a.ops.operationDue('t',source,now).due,true);assert.equal(a.ops.operationDue('p',source,new Date('2026-09-23T07:00:00Z')).due,true);
+ assert.equal(a.ops.operationDue('t',source,now).due,false);assert.equal(a.ops.operationDue('t',source,new Date(now.valueOf()+7*86400000)).due,true);assert.equal(a.ops.operationDue('p',source,new Date('2026-09-23T07:00:00Z')).due,true);
  assert.equal(a.ops.operationDue('b',{meta:{origin:'manual',receivedAt:now.valueOf()}},now).due,true);
  const newYear=a.ops.operationsScope('t',new Date('2027-03-22T07:00:00Z'));assert.equal(newYear.fromDate,'1406/01/01');
  for(const bad of [{sourceId:'evil'},{...a.ops.operationsScope('alef',now),warehouse:'روغن'},{...a.ops.operationsScope('t',now),url:'https://other.example'}])assert.throws(()=>validateOperation(bad,now),{code:'INVALID_SCOPE'});

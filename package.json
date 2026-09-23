@@ -2,7 +2,7 @@
   "name": "hedax-dealership-dashboard",
   "version": "0.2.0",
   "private": true,
-  "scripts": {"start": "node companion/server.cjs", "test": "node tests/run-tests.js && node tests/companion.test.cjs && node tests/operations.test.cjs && node tests/management.test.cjs"},
+  "scripts": {"start": "node companion/server.cjs", "test": "node tests/run-tests.js && node tests/companion.test.cjs && node tests/operations.test.cjs && node tests/adapter.test.cjs && node tests/launcher.test.cjs && node tests/reception-batch.test.cjs && node tests/management.test.cjs"},
   "dependencies": {"playwright": "1.62.1"},
   "engines": {"node": ">=22"}
 }

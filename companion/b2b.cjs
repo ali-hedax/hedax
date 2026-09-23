@@ -63,13 +63,19 @@ class B2BClient {
     const scope = validateScope(input);
     if (this.busy) throw failure('BUSY', 'دریافت دیگری در حال اجراست؛ کمی بعد دوباره تلاش کنید.');
     this.busy = true;
+    let phase = 'باز کردن مرورگر';
     try {
       const page = await this.open();
+      phase = 'باز کردن گزارش نوبت‌دهی';
       await page.goto(REPORT_URL, {waitUntil:'domcontentloaded', timeout:45000});
       const report = page.getByRole('listbox', {name:'گزارش', exact:true});
       try { await report.waitFor({state:'visible', timeout:15000}); }
-      catch { throw failure('LOGIN_REQUIRED', 'ورود B2B لازم است. در پنجرهٔ بازشده وارد شوید و دوباره تلاش کنید.'); }
+      catch {
+        if (new URL(page.url()).pathname !== '/PlanningReport') throw failure('LOGIN_REQUIRED', 'ورود B2B لازم است. در پنجرهٔ بازشده وارد شوید و دوباره تلاش کنید.');
+        throw failure('PAGE_CHANGED', 'فهرست گزارش نوبت‌دهی پیدا نشد؛ صفحهٔ B2B را بررسی کنید.');
+      }
       if (new URL(page.url()).origin !== 'https://b2b.isaco.ir') throw failure('LOGIN_REQUIRED', 'ورود B2B کامل نشده است.');
+      phase = 'تنظیم تاریخ، وضعیت و سالن';
       await selectReportValue(page, 'گزارش', 'گزارش نوبت دهی و برنامه تعمیرات');
       const date = page.getByRole('textbox', {name:'تاریخ روز', exact:true});
       await date.fill(scope.dateKey); await date.press('Tab');
@@ -78,6 +84,7 @@ class B2BClient {
       const normalizeDigits = s => s.replace(/[۰-۹]/g, c => '۰۱۲۳۴۵۶۷۸۹'.indexOf(c)).replace(/[٠-٩]/g, c => '٠١٢٣٤٥٦٧٨٩'.indexOf(c));
       if (normalizeDigits(await date.inputValue()) !== scope.dateKey) throw failure('FILTER_MISMATCH', 'تاریخ گزارش تأیید نشد.');
       // Download listener is registered before the Excel click; keep report bytes out of logs.
+      phase = 'دریافت اکسل نوبت‌دهی';
       const downloadPromise = page.waitForEvent('download', {timeout:90000});
       downloadPromise.catch(() => {});
       await page.getByRole('button', {name:'خروجی Excel', exact:true}).click();
@@ -93,7 +100,7 @@ class B2BClient {
       } finally { await download.delete().catch(() => {}); }
     } catch (err) {
       if (err.code) throw err;
-      throw failure('B2B_UNAVAILABLE', 'دریافت از B2B کامل نشد. اتصال، ورود و صفحهٔ گزارش را بررسی کنید؛ گزارش قبلی حفظ شده است.');
+      throw failure('B2B_UNAVAILABLE', 'دریافت نوبت‌دهی در مرحلهٔ «' + phase + '» کامل نشد؛ صفحهٔ B2B را بررسی کنید. گزارش قبلی حفظ شده است.');
     } finally { this.busy = false; }
   }
   async report(input) { return require('./operations.cjs').runOperation(this,input,selectReportValue); }

@@ -12,6 +12,13 @@ function today(now=new Date()) {
 function validateOperation(input,now=new Date()) {
   const t=today(now),id=input&&input.sourceId;
   if(!Object.hasOwn(ROUTES,id))throw fail('INVALID_SCOPE','نوع گزارش معتبر نیست.');
+  if(id==='t'&&input.part===true){
+    const days=[];
+    for(let i=0;i<367;i++){const d=today(new Date(now.valueOf()-i*86400000));if(d.year!==t.year)break;days.push(d.date);}
+    const first=days.indexOf(input.fromDate),last=days.indexOf(input.toDate);
+    if(Object.keys(input).length!==4||first<0||last<0||first<last||first-last>6)throw fail('INVALID_SCOPE','هر بخش پذیرش باید حداکثر هفت روز و در سال جاری تا امروز باشد.');
+    return {sourceId:'t',fromDate:input.fromDate,toDate:input.toDate,part:true};
+  }
   const expected=id==='alef'?{sourceId:id,dateKey:t.date,warehouse:WAREHOUSE}:id==='b'?{sourceId:id,dateKey:t.date,year:t.year}:{sourceId:id,fromDate:t.year+'/01/01',toDate:t.date};
   if(Object.keys(input).length!==Object.keys(expected).length||Object.entries(expected).some(([k,v])=>input[k]!==v))throw fail('INVALID_SCOPE','محدوده باید از ابتدای سال جاری تا امروز باشد؛ برای موجودی، تاریخ امروز لازم است.');
   if(id==='p'&&t.hour<10)throw fail('REPORT_NOT_READY','گزارش امداد ویژه از ساعت ۱۰ صبح تهران قابل دریافت است.');
@@ -45,12 +52,17 @@ async function runOperation(client,input,select) {
   const scope=validateOperation(input),id=scope.sourceId;
   if(client.busy)throw fail('BUSY','دریافت دیگری در حال اجراست؛ کمی بعد دوباره تلاش کنید.');
   client.busy=true;
+  let phase='باز کردن مرورگر';
   try {
-    const page=await client.open();await page.goto('https://b2b.isaco.ir'+ROUTES[id],{waitUntil:'domcontentloaded',timeout:45000});
+    const page=await client.open();phase='باز کردن صفحهٔ گزارش';await page.goto('https://b2b.isaco.ir'+ROUTES[id],{waitUntil:'domcontentloaded',timeout:45000});
     const anchor=id==='alef'?page.getByRole('listbox',{name:'انبار',exact:true}):id==='b'?page.getByRole('button',{name:'تکمیل اطلاعات',exact:true}):page.getByRole('textbox',{name:'از تاریخ پذیرش',exact:true});
-    try{await anchor.waitFor({state:'visible',timeout:20000});}catch{throw fail('LOGIN_REQUIRED','در پنجره B2B وارد شوید؛ سپس به‌روزرسانی را بزنید.');}
+    try{await anchor.waitFor({state:'visible',timeout:20000});}catch{
+      if(new URL(page.url()).pathname!==ROUTES[id])throw fail('LOGIN_REQUIRED','در پنجره B2B وارد شوید؛ سپس به‌روزرسانی را بزنید.');
+      throw fail('PAGE_CHANGED','کنترل گزارش در صفحهٔ B2B پیدا نشد؛ صفحه را در پنجرهٔ همراه بررسی کنید.');
+    }
     if(new URL(page.url()).pathname!==ROUTES[id])throw fail('PAGE_CHANGED','صفحهٔ گزارش مورد انتظار باز نشد.');
     let button;
+    phase='تنظیم و تأیید فیلترها';
     if(id==='alef') {
       await select(page,'انبار',WAREHOUSE);
       await blank(page,'listbox',['نوع قطعات']);await blank(page,'textbox',['کد تدارکاتی']);
@@ -58,7 +70,8 @@ async function runOperation(client,input,select) {
     } else if(id==='b') {
       if(digits(await page.locator('#year').inputValue())!==scope.year)throw fail('FILTER_MISMATCH','سال فعال B2B با سال گزارش یکسان نیست.');
       await blank(page,'listbox',['نوع گردش','گروه قطعه','گروه خودرو']);await blank(page,'textbox',['کد اختصاصی']);
-      if(await page.getByRole('checkbox',{name:'کالاخاص',exact:true}).isChecked())throw fail('FILTER_MISMATCH','فیلتر کالای خاص باید غیرفعال باشد.');
+      if(await page.getByRole('checkbox',{name:/^کالا\s*خاص است؟/}).isChecked())throw fail('FILTER_MISMATCH','فیلتر کالای خاص باید غیرفعال باشد.');
+      phase='تکمیل اطلاعات DPLAN';
       await anchor.click();
       await page.getByText(/[0-9۰-۹]+\s*-\s*[0-9۰-۹]+\s+از\s+[0-9۰-۹]+/).waitFor({state:'visible',timeout:60000});
       button=page.getByRole('button',{name:/^\s*\S*\s*برنامه ریزی موجودی نمایندگی$/});
@@ -74,10 +87,13 @@ async function runOperation(client,input,select) {
         button=page.getByRole('button',{name:'خروجی اکسل',exact:true});
       }
     }
+    phase='انتخاب خروجی اکسل';
+    await button.waitFor({state:'visible',timeout:20000});
+    phase='دریافت فایل اکسل';
     return await receive(page,button,scope);
   } catch(e) {
     if(e.code)throw e;
-    throw fail('B2B_UNAVAILABLE','دریافت گزارش کامل نشد؛ ورود، اتصال و فیلترهای صفحه را بررسی کنید.');
+    throw fail('B2B_UNAVAILABLE','دریافت گزارش در مرحلهٔ «'+phase+'» کامل نشد. صفحهٔ بازشده در پنجرهٔ B2B را بررسی کنید.');
   } finally {client.busy=false;}
 }
 module.exports={ROUTES,WAREHOUSE,today,validateOperation,fileKind,runOperation};

@@ -329,7 +329,7 @@ button, select, input { font-family: inherit; }
 .rev-list li { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
 .rev-list li:last-child { border-bottom: 0; }
 .rev-list .rev-file { color: var(--muted); word-break: break-all; }
-.ops-panel{margin:16px 0}.ops-source{padding:10px 0;border-bottom:1px solid var(--border)}.ops-controls{display:flex;flex-wrap:wrap;align-items:center;gap:12px}.ops-controls input:not([type=checkbox]),.ops-controls select,.ops-controls button{min-height:44px}.ops-controls strong{margin-inline-end:auto}.ops-panel .muted-note{margin:8px 0}.ops-panel button{min-height:40px}
+.ops-quick{margin:12px 0 18px}.ops-quick button{min-height:44px}.ops-quick p{margin:7px 0}.ops-panel{margin:16px 0}.ops-source{padding:10px 0;border-bottom:1px solid var(--border)}.ops-controls{display:flex;flex-wrap:wrap;align-items:center;gap:12px}.ops-controls input:not([type=checkbox]),.ops-controls select,.ops-controls button{min-height:44px}.ops-controls strong{margin-inline-end:auto}.ops-panel .muted-note{margin:8px 0}.ops-panel button{min-height:40px}
 .management-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.management-heading h2{margin:0;font-size:22px}.management-heading .card-title{margin:0}.management-day{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0}.management-day input{min-height:44px;max-width:150px;background:var(--surface-2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px;font:inherit}.management-kpis,.management-charts,.management-summary{margin-bottom:18px}.management-charts{margin-top:18px}.management-charts .management-heading{margin-bottom:16px}.management-data{margin-top:20px}.management-sources{display:grid;gap:8px;margin:14px 0}.management-source{padding:10px;border-inline-start:3px solid var(--warn);font-size:12px}.management-source.loaded{border-color:var(--teal)}details>summary{cursor:pointer;min-height:44px;font-weight:700;line-height:1.8}details>summary:focus-visible{outline:2px solid var(--teal);outline-offset:4px}.management-heading button,.management-day button{min-height:44px}
 @media print{#managementOverview button,.management-charts button,.management-data,.ops-panel,#b2bSyncPanel{display:none!important}.management-charts>.card{break-inside:avoid}.management-summary{break-before:page}}
 </style>
@@ -427,6 +427,10 @@ button, select, input { font-family: inherit; }
       <p class="section-sub">گزارش نوبت‌دهی روزانه — هر گزارش با تاریخ و محدودهٔ خودش نگهداری می‌شود</p>
 
 
+      <div class="card ops-quick no-print" aria-label="دریافت نوبت‌دهی از B2B">
+        <div class="ops-controls"><button id="b2bQuickRefresh" type="button" class="btn btn-primary">دریافت نوبت‌دهی از B2B</button><button id="b2bQuickLogin" type="button" class="btn btn-ghost">ورود به B2B</button><button id="b2bQuickSettings" type="button" class="btn btn-ghost">تاریخ و تنظیمات</button></div>
+        <p class="micro">گزارش روزانه با تاریخ و سالن انتخابی؛ پذیرش و نام پذیرشگر در بخش «پذیرش تا ترخیص» تحلیل می‌شود.</p><p id="b2bQuickMessage" role="status" aria-live="polite">آمادهٔ دریافت گزارش؛ وضعیت اتصال اینجا نمایش داده می‌شود.</p>
+      </div>
       <div id="nobatBody"></div>
       <details class="no-print" id="b2bSyncPanel" aria-label="دریافت خودکار از B2B" style="border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:18px">
         <summary>به‌روزرسانی دادهٔ نوبت‌دهی از B2B</summary>
@@ -2897,11 +2901,27 @@ function computeReceptionStats(records, dateKey, basis='performed') {
     missingDates:rows.filter(r=>!r.admission.valid).length,conflicts:rows.filter(r=>r.dateConflict).length,uncertain:rows.filter(r=>r.uncertainStop).length,
     missingCards,duplicateRows:records.length-missingCards-rows.length,cancelled:daily.filter(r=>r.cancelled).length};
 }
+function receptionCovers(source,dateKey){
+  const day=receptionDate(dateKey),meta=source?.meta;
+  if(!day.valid)return false;
+  if(meta?.origin==='b2b'&&meta.fromDate&&meta.toDate){const from=receptionDate(meta.fromDate),to=receptionDate(meta.toDate);return from.valid&&to.valid&&day.jdn>=from.jdn&&day.jdn<=to.jdn;}
+  return true; // Manual files have no confirmed scope; all labels remain file-scoped.
+}
+function receptionFlow(stats,dateKey){
+  const day=receptionDate(dateKey),rows=stats.rows.filter(r=>r.admission.valid&&r.admission.jy===day.jy&&r.admission.jdn<=day.jdn&&!r.dateConflict);
+  const releases=rows.filter(r=>!r.cancelled&&r.release.valid&&r.release.jdn<=day.jdn);
+  const months=Array.from({length:day.jm},(_,i)=>({label:JMONTHS[i],admissions:rows.filter(r=>r.admission.jm===i+1).length,releases:releases.filter(r=>r.release.jy===day.jy&&r.release.jm===i+1).length}));
+  return {admissions:rows.length,releasedToday:releases.filter(r=>r.release.jdn===day.jdn).length,months};
+}
 function renderReception() {
   const body=document.getElementById('receptionBody'), source=STATE.sources.t;
   if(!source){body.innerHTML=emptyState('برای این گزارش، فایل «پذیرش تا ترخیص» را دریافت یا بارگذاری کنید.',true);wireEmptyStateButtons(body);return;}
   const dateKey=STATE.receptionDay||operationsToday().dateKey, basis=STATE.receptionBasis||'performed';
-  const s=computeReceptionStats(source.records,dateKey,basis), kc=s.kindCounts;
+  if(!receptionCovers(source,dateKey)){
+    body.innerHTML='<div class="card"><h3>گزارش این روز هنوز دریافت نشده است</h3><p>آخرین پوشش گزارش: '+esc(source.meta.fromDate)+' تا '+esc(source.meta.toDate)+'. نبود گزارش به معنی صفر پذیرش یا صفر توقف نیست.</p><button class="btn btn-primary" id="recCoveredDay" type="button">نمایش آخرین روز گزارش</button><p>برای تازه‌سازی، دکمهٔ دریافت از B2B در بالای همین بخش را بزنید.</p></div>';
+    document.getElementById('recCoveredDay').addEventListener('click',()=>{STATE.receptionDay=source.meta.toDate;renderReception();});return;
+  }
+  const s=computeReceptionStats(source.records,dateKey,basis), kc=s.kindCounts,flow=receptionFlow(s,dateKey);
   const validHours=s.rows.filter(r=>!r.cancelled&&r.hours!==null).map(r=>r.hours),avgH=meanOf(validHours),medH=medianOf(validHours);
   const serviceTitle=basis==='performed'?'خدمات انجام‌شده':'نوع مراجعه از توضیحات پذیرش';
   const value=n=>s.known?fmtInt(n):'—';
@@ -2917,8 +2937,10 @@ function renderReception() {
     ${kpiCard('خودروهای مانده از روزهای قبل',{html:fmtInt(s.stopped.length)},'در محدودهٔ گزارش؛ پایان روز انتخاب‌شده')}
     ${kpiCard('تعمیرات'+(basis==='performed'?' انجام‌شده':' درخواستی'),{html:value(kc.repair+kc.both)},'بدون انصرافی؛ شامل موارد تعمیر و سرویس مشترک')}
     ${kpiCard('سرویس دوره‌ای و روغن',{html:value(kc.service+kc.both)},basis==='performed'?'خدمات ثبت‌شده':'تشخیص از متن؛ انجام خدمت را تأیید نمی‌کند')}
+    ${kpiCard('پذیرش تجمعی سال در فایل',{html:fmtInt(flow.admissions)},'کارت یکتا تا روز انتخابی؛ فقط محدودهٔ دریافت‌شده')}${kpiCard('ترخیص واقعی در روز',{html:fmtInt(flow.releasedToday)},'بر اساس تاریخ ترخیص؛ بدون انصرافی')}
     ${kpiCard('انصرافی روز',{html:fmtInt(s.cancelled)})}${kpiCard('نوع خدمت نامشخص',{html:fmtInt(kc.unknown)})}</div>
     <div class="card" style="margin-bottom:16px"><h3 class="card-title">پذیرش به تفکیک پذیرشگر — ${esc(dateKey)}</h3><div class="grid12">${s.staff.map(x=>kpiCard(x.name,{html:fmtInt(x.count)})).join('')||'<p>پذیرشی برای این روز در فایل موجود نیست.</p>'}</div><div id="recByStaff"></div></div>
+    <div class="card" style="margin-bottom:16px"><h3 class="card-title">ورودی و خروجی تعمیرگاه در ماه‌های سال</h3><p class="micro">پذیرش ثبت‌شده و ترخیص واقعی کارت‌های موجود در فایل؛ ماه جاری تا روز انتخابی.</p><div id="recMonthlyFlow"></div></div>
     <div class="card" style="margin-bottom:16px"><h3 class="card-title">پذیرش روزانه در ۱۴ روز منتهی به روز انتخاب‌شده</h3><div id="recDailyChart"></div></div>
     <div class="card" style="margin-bottom:16px"><h3 class="card-title">${esc(serviceTitle)}</h3><p class="muted-note">${basis==='performed'?'فقط ریز خدمات انجام‌شده یا نوع خدمت همراه تأیید اتمام، مبنای آمار قطعی است. شرح مشتری و ترخیص به‌تنهایی اثبات انجام تعمیر نیست.':'این نمودار از متن توضیحات پذیرش استخراج شده است و آمار قطعی خدمات انجام‌شده نیست.'} دو کارت بالای صفحه می‌توانند هم‌پوشان باشند؛ نمودار زیر گروه‌های جدا دارد.</p><div id="recServiceChart"></div></div>
     <div class="card" style="margin-bottom:16px"><h3 class="card-title">خودروهای متوقف از روزهای قبل</h3><p class="muted-note">فاقد ترخیص تا پایان روز انتخاب‌شده و دارای وضعیت فعال؛ پذیرش‌های خارج از بازهٔ فایل و موارد نامشخص در این عدد نیستند.</p><div id="recStoppedChart"></div><div id="recStoppedTable"></div></div>
@@ -2927,6 +2949,7 @@ function renderReception() {
   document.getElementById('recDay').addEventListener('change',e=>{const p=parseJalaliInput(e.target.value);if(!p.valid){toast(p.reason,'danger');return;}STATE.receptionDay=p.key;renderReception();});
   document.getElementById('recToday').addEventListener('click',()=>{STATE.receptionDay=null;renderReception();});
   document.getElementById('recBasis').addEventListener('change',e=>{STATE.receptionBasis=e.target.value;renderReception();});
+  renderLineChart(document.getElementById('recMonthlyFlow'),flow.months.map(m=>m.label),[{name:'پذیرش',values:flow.months.map(m=>m.admissions),color:'var(--teal)'},{name:'ترخیص واقعی',values:flow.months.map(m=>m.releases),color:'var(--gold)'}],{legend:true});
   renderVBarChart(document.getElementById('recByStaff'),s.staff.map(x=>x.name),s.staff.map(x=>x.count),{color:'var(--teal)'});
   renderVBarChart(document.getElementById('recDailyChart'),s.trend.map(x=>x.label.slice(5)),s.trend.map(x=>x.count),{color:'var(--teal)'});
   renderVBarChart(document.getElementById('recServiceChart'),['فقط تعمیرات','فقط سرویس و روغن','تعمیرات و سرویس','سایر خدمات','نامشخص'],['repair','service','both','other','unknown'].map(k=>kc[k]),{color:'var(--teal)'});
@@ -3493,6 +3516,18 @@ document.addEventListener("DOMContentLoaded", initApp);
 </script>
 <script>
 /* Local companion: no B2B credentials or remote operational requests in this page. */
+// All modules share one transport queue because the companion controls one browser.
+const B2BRequests=(()=>{
+  let tail=Promise.resolve(),token=null;
+  async function send(route,body){
+    try{
+      if(!token){const r=await fetch('/api/b2b/session',{cache:'no-store',signal:AbortSignal.timeout(5000)});if(!r.ok)throw Error('همراه هداکس آماده نیست؛ start-hedax.cmd را اجرا کنید.');const v=await r.json();if(!v.token)throw Error('این صفحه به همراه هداکس متصل نیست.');token=v.token;}
+      const r=await fetch('/api/b2b/'+route,{method:'POST',headers:{'Content-Type':'application/json','X-Hedax-Token':token},body:JSON.stringify(body),signal:AbortSignal.timeout(240000)});
+      const result=await r.json();if(!r.ok){if(r.status===403)token=null;throw Object.assign(Error(result.message||'دریافت ناموفق بود.'),{code:result.code});}return result;
+    }catch(e){if(e instanceof TypeError||e instanceof SyntaxError){token=null;throw Error('ارتباط با همراه هداکس برقرار نیست. start-hedax.cmd را اجرا کنید و دوباره دریافت را بزنید.');}throw e;}
+  }
+  return {request:(route,body)=>{const next=tail.catch(()=>{}).then(()=>send(route,body));tail=next;return next;}};
+})();
 const B2BSync = (() => {
   let busy = false, token = null, configured = false;
   const $ = id => document.getElementById(id);
@@ -3504,10 +3539,12 @@ const B2BSync = (() => {
   function message(text, error=false) {
     if (!$('b2bMessage')) return;
     $('b2bMessage').textContent = text;
+    if($('b2bQuickMessage'))$('b2bQuickMessage').textContent=text;
     $('b2bMessage').style.color = error ? 'var(--danger)' : '';
   }
   function setBusy(value) {
     busy=value;
+    for(const id of ['b2bQuickRefresh','b2bQuickLogin'])if($(id))$(id).disabled=value;
     $('b2bSyncPanel').setAttribute('aria-busy',String(value));
     for (const id of ['b2bRefresh','b2bLogin','b2bDate','b2bToday','b2bStatus','b2bHall','b2bAuto']) $(id).disabled=value;
     if (!value) $('b2bDate').disabled=$('b2bToday').checked;
@@ -3515,17 +3552,7 @@ const B2BSync = (() => {
   function save() {
     try { localStorage.setItem('hedax-b2b-settings',JSON.stringify({enabled:$('b2bAuto').checked,today:$('b2bToday').checked,dateKey:$('b2bDate').value,statusFilter:$('b2bStatus').value,hall:$('b2bHall').value})); } catch {}
   }
-  async function request(route, body) {
-    if (!token) {
-      const r = await fetch('/api/b2b/session',{cache:'no-store',signal:AbortSignal.timeout(5000)});
-      if (!r.ok) throw new Error('همراه محلی اجرا نیست. هداکس را با start-hedax.cmd اجرا کنید.');
-      const s=await r.json(); if (!s.token) throw new Error('همراه محلی هداکس در دسترس نیست.'); token=s.token;
-    }
-    const r=await fetch('/api/b2b/' + route,{method:'POST',headers:{'Content-Type':'application/json','X-Hedax-Token':token},body:JSON.stringify(body),signal:AbortSignal.timeout(180000)});
-    const result=await r.json();
-    if (!r.ok) { if (r.status===403) token=null; throw new Error(result.message || 'دریافت گزارش کامل نشد.'); }
-    return result;
-  }
+  const request=(route,body)=>B2BRequests.request(route,body);
   async function run() {
     if (busy) return;
     let parsed;
@@ -3562,6 +3589,9 @@ const B2BSync = (() => {
       if (Array.from($(id).options).some(x=>x.value===saved[key])) $(id).value=saved[key];
     }
     $('b2bRefresh').addEventListener('click',run);
+    $('b2bQuickRefresh').addEventListener('click',run);
+    $('b2bQuickLogin').addEventListener('click',login);
+    $('b2bQuickSettings').addEventListener('click',()=>{$('b2bSyncPanel').open=true;$('b2bSyncPanel').scrollIntoView({block:'start'});});
     $('b2bLogin').addEventListener('click',login);
     for(const id of ['b2bAuto','b2bToday','b2bDate','b2bStatus','b2bHall']) $(id).addEventListener('change',()=>{
       $('b2bDate').disabled=$('b2bToday').checked;
@@ -3621,6 +3651,7 @@ function operationDue(sourceId,source,now=new Date(),force=false) {
   if(sourceId==='p'&&t.hour<10) return {due:false,reason:'گزارش امداد ویژه از ساعت ۱۰ صبح به وقت تهران قابل دریافت است.'};
   if(force||!meta||meta.origin!=='b2b')return {due:true};
   if(!Number.isFinite(meta.receivedAt))return {due:true};
+  if(sourceId==='t'&&now.valueOf()-meta.receivedAt<7*86400000)return {due:false,reason:'گزارش پذیرش دریافت شده؛ به‌روزرسانی خودکار هفت روز پس از دریافت قبلی است. برای دریافت تازه، دکمهٔ دریافت را بزنید.'};
   const last=operationsToday(new Date(meta.receivedAt));
   if(['p','b'].includes(sourceId)&&last.year===t.year&&last.month===t.month)return {due:false,reason:'گزارش این ماه دریافت شده؛ به‌روزرسانی بعدی پس از شروع ماه جدید است.'};
   return {due:true};
@@ -3636,7 +3667,7 @@ const SourceSnapshots=(()=>{
   async function run(mode,fn){const db=await open();return new Promise((resolve,reject)=>{const tx=db.transaction('sources',mode),req=fn(tx.objectStore('sources'));tx.oncomplete=()=>resolve(req&&req.result);tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});}
   return {all:()=>run('readonly',s=>s.getAll()),put:s=>run('readwrite',st=>st.put(s))};
 })();
-async function importOperationReport(payload,expectedScope) {
+async function parseOperationPayload(payload,expectedScope) {
   if(!payload||!payload.scope||Object.keys(payload.scope).length!==Object.keys(expectedScope).length||Object.entries(expectedScope).some(([k,v])=>payload.scope[k]!==v)||!Number.isFinite(payload.receivedAt))throw new Error('محدودهٔ گزارش دریافتی با درخواست یکسان نیست.');
   const id=expectedScope.sourceId;
   if(!['alef','b','p','t'].includes(id)||typeof payload.base64!=='string'||payload.base64.length>72*1024*1024)throw new Error('فایل گزارش نامعتبر است.');
@@ -3647,11 +3678,45 @@ async function importOperationReport(payload,expectedScope) {
   // Real exports contain totals and incomplete rows. Preserve the raw grid and
   // diagnostics, and make exclusions visible instead of silently hiding them.
   if(!res.records.length&&res.diag.rejectedRowCount>0)throw new Error('هیچ ردیف معتبری شناسایی نشد؛ آخرین گزارش معتبر حفظ شد.');
-  const hash=await hashBytes(bytes.buffer), previous=STATE.sources[id];
+  return {id,res,file,hash:await hashBytes(bytes.buffer)};
+}
+async function importOperationReport(payload,expectedScope) {
+  const {id,res,file,hash}=await parseOperationPayload(payload,expectedScope),previous=STATE.sources[id];
+  if(id==='t'&&res.records.length+(res.diag.rejectedRowCount||0)>=1000)throw Error('گزارش به سقف ۱۰۰۰ پذیرش رسیده است؛ دریافت بخش‌بندی‌شده لازم است.');
   const snapshot={sourceId:id,records:res.records,diag:res.diag,meta:{...expectedScope,receivedAt:payload.receivedAt,origin:'b2b',contentHash:hash,fileName:file.name}};
   await SourceSnapshots.put(snapshot);
   STATE.sources[id]=snapshot;renderOperationSnapshot(id);recomputeDerived();renderFileDots();renderActiveTab();
   return {duplicate:!!(previous&&previous.meta&&previous.meta.contentHash===hash),count:res.records.length,excluded:res.diag.rejectedRowCount};
+}
+function receptionPartitions(fromDate,toDate){
+  const from=receptionDate(fromDate),to=receptionDate(toDate);if(!from.valid||!to.valid||from.jdn>to.jdn)throw Error('بازهٔ پذیرش معتبر نیست.');
+  const key=n=>{const j=JAL.d2j(n);return jalaliKey(j.jy,j.jm,j.jd);},parts=[];
+  for(let n=from.jdn;n<=to.jdn;n+=7)parts.push({sourceId:'t',fromDate:key(n),toDate:key(Math.min(n+6,to.jdn)),part:true});
+  return parts;
+}
+async function fetchReceptionYear(request,scope,progress=()=>{}){
+  const ranges=receptionPartitions(scope.fromDate,scope.toDate),accepted=[],seen=new Set();
+  let receivedAt=0;
+  async function read(part){
+    progress('دریافت پذیرش '+part.fromDate+' تا '+part.toDate+'؛ '+accepted.length+' بخش کامل شده. اطلاعات قبلی تا پایان حفظ می‌شود.');
+    const payload=await request('report',part),parsed=await parseOperationPayload(payload,part),rows=parsed.res.records;
+    if(rows.length+(parsed.res.diag.rejectedRowCount||0)>=1000){
+      const from=receptionDate(part.fromDate).jdn,to=receptionDate(part.toDate).jdn;
+      if(from===to)throw Error('حتی گزارش یک روز به سقف ۱۰۰۰ مورد رسیده؛ اطلاعات کامل نیست و جایگزین نشد.');
+      const mid=Math.floor((from+to)/2),key=n=>{const j=JAL.d2j(n);return jalaliKey(j.jy,j.jm,j.jd);};
+      await read({...part,toDate:key(mid)});await read({...part,fromDate:key(mid+1)});return;
+    }
+    const start=receptionDate(part.fromDate).jdn,end=receptionDate(part.toDate).jdn;
+    for(const row of rows){const d=receptionDate(row.admissionDate);if(!d.valid||d.jdn<start||d.jdn>end)throw Error('تاریخ ردیف‌های پذیرش با بازهٔ درخواستی هم‌خوان نیست؛ گزارش قبلی حفظ شد.');const key=normKey(row.cardNo)+'|'+d.jy;if(seen.has(key))throw Error('یک کارت در چند بخش گزارش تکرار شده؛ بازه‌های B2B باید بررسی شود.');}
+    for(const row of rows)seen.add(normKey(row.cardNo)+'|'+receptionDate(row.admissionDate).jy);
+    accepted.push({scope:part,...parsed});receivedAt=Math.max(receivedAt,payload.receivedAt);
+  }
+  for(const part of ranges)await read(part);
+  const records=accepted.flatMap(x=>x.res.records),hash=await hashBytes(new TextEncoder().encode(accepted.map(x=>x.hash).join('|')).buffer),previous=STATE.sources.t;
+  const diag={...accepted[0]?.res.diag,fileName:'پذیرش سال جاری — '+accepted.length+' بخش',fileSize:accepted.reduce((n,x)=>n+x.file.size,0),rawRowCount:accepted.reduce((n,x)=>n+x.res.diag.rawRowCount,0),validRowCount:records.length,rejectedRowCount:accepted.reduce((n,x)=>n+(x.res.diag.rejectedRowCount||0),0),grid:null,parts:accepted.map(x=>({scope:x.scope,diag:x.res.diag})),partCount:accepted.length};
+  const snapshot={sourceId:'t',records,diag,meta:{...scope,receivedAt,origin:'b2b',contentHash:hash,fileName:'پذیرش-سال-جاری',partitioned:true,parts:accepted.map(x=>({fromDate:x.scope.fromDate,toDate:x.scope.toDate,rows:x.res.records.length,hash:x.hash}))}};
+  await SourceSnapshots.put(snapshot);STATE.sources.t=snapshot;renderOperationSnapshot('t');recomputeDerived();renderFileDots();renderActiveTab();
+  return {duplicate:previous?.meta?.contentHash===hash,count:records.length,excluded:diag.rejectedRowCount};
 }
 function renderOperationSnapshot(id) {
   const s=STATE.sources[id],card=document.getElementById('upcard-'+id);if(!s||!card)return;
@@ -3666,11 +3731,7 @@ const OperationsSync=(()=>{
   let token=null,queue=Promise.resolve(),pending=new Set(),initialized=false,ready=Promise.resolve(),clockKey='';
   function show(id,msg){messages[id]=msg;document.querySelectorAll('[data-ops-status="'+id+'"]').forEach(el=>el.textContent=msg);}
   function busy(id,value){document.querySelectorAll('[data-ops-refresh="'+id+'"]').forEach(el=>el.disabled=value);document.querySelectorAll('[data-ops-source="'+id+'"]').forEach(el=>el.setAttribute('aria-busy',String(value)));}
-  async function request(route,input){
-    if(!token){const r=await fetch('/api/b2b/session',{cache:'no-store',signal:AbortSignal.timeout(5000)});if(!r.ok)throw new Error('همراه محلی را با start-hedax.cmd اجرا کنید.');token=(await r.json()).token;}
-    const r=await fetch('/api/b2b/'+route,{method:'POST',headers:{'Content-Type':'application/json','X-Hedax-Token':token},body:JSON.stringify(input),signal:AbortSignal.timeout(240000)});
-    const result=await r.json();if(!r.ok){if(r.status===403)token=null;throw Object.assign(new Error(result.message||'دریافت ناموفق بود.'),{code:result.code});}return result;
-  }
+  const request=(route,input)=>B2BRequests.request(route,input);
   function sync(id,force=false){
     if(pending.has(id))return queue;
     pending.add(id);busy(id,true);show(id,'در صف دریافت…');
@@ -3680,7 +3741,8 @@ const OperationsSync=(()=>{
       if(!due.due){show(id,due.reason);return;}
       const scope=operationsScope(id);
       show(id,'در حال دریافت '+names[id]+'… گزارش قبلی تا پایان دریافت حفظ می‌شود.');
-      const payload=await request('report',scope),result=await importOperationReport(payload,scope);
+      const result=id==='t'?await fetchReceptionYear(request,scope,msg=>show(id,msg)):await importOperationReport(await request('report',scope),scope);
+      const payload={receivedAt:STATE.sources[id].meta.receivedAt};
       show(id,(result.duplicate?'محتوا تغییری نداشت. ':'گزارش دریافت و ذخیره شد. ')+fmtInt(result.count)+' ردیف · '+fmtJalaliDateTime(payload.receivedAt)+(result.excluded?' · '+fmtInt(result.excluded)+' ردیف ناقص یا جمع در آمار نیست؛ جزئیات ورودی را بررسی کنید.':''));
     }).catch(e=>show(id,(e.name==='TimeoutError'?'زمان دریافت طولانی شد؛ دوباره تلاش کنید.':e.message)+' آخرین دادهٔ معتبر حفظ شده است.')).finally(()=>{pending.delete(id);busy(id,false);});
     return queue;
@@ -3691,6 +3753,11 @@ const OperationsSync=(()=>{
       const panel=document.createElement('details');panel.className='card ops-panel no-print';panel.setAttribute('aria-label','دریافت گزارش‌های B2B');
       panel.innerHTML='<summary>به‌روزرسانی داده‌های مبنای تحلیل از B2B</summary>'+ids.map(id=>'<div class="ops-source" data-ops-source="'+id+'"><div class="ops-controls"><strong>'+names[id]+'</strong><label><input type="checkbox" data-ops-auto="'+id+'" '+(enabled[id]?'checked':'')+'> خودکار</label><button type="button" class="btn btn-ghost btn-sm" data-ops-refresh="'+id+'">به‌روزرسانی اکنون</button></div><p class="muted-note" role="status" aria-live="polite" data-ops-status="'+id+'"></p></div>').join('')+'<button type="button" class="btn btn-ghost btn-sm ops-login">ورود به B2B</button>';
       if(tab==='dashboard')document.getElementById('managementSyncSlot').appendChild(panel);else parent.appendChild(panel);
+      const quick=document.createElement('div');quick.className='card ops-quick no-print';quick.setAttribute('aria-label','اتصال B2B');
+      quick.innerHTML='<div class="ops-controls">'+ids.map(id=>'<button class="btn btn-primary" type="button" data-ops-refresh="'+id+'">دریافت '+names[id]+' از B2B</button>').join('')+'<button type="button" class="btn btn-ghost ops-login">ورود به B2B</button></div><p class="micro">'+(ids.includes('t')?'پذیرش: به‌روزرسانی هفتگی؛ دریافت از اول سال در بخش‌های کوچک برای کنترل سقف ۱۰۰۰ مورد. ': '')+(ids.includes('p')?'امداد: از اول سال تا امروز، از ساعت ۱۰ صبح. ':'')+(ids.includes('alef')||ids.includes('b')?'موجودی و DPLAN: آخرین وضعیت سال جاری.':'')+'</p>'+ids.map(id=>'<p class="micro" role="status" aria-live="polite"><strong>'+names[id]+': </strong><span data-ops-status="'+id+'"></span></p>').join('');
+      parent.querySelector('.section-sub').insertAdjacentElement('afterend',quick);
+      quick.querySelectorAll('[data-ops-refresh]').forEach(el=>el.addEventListener('click',()=>sync(el.dataset.opsRefresh,true)));
+      quick.querySelector('.ops-login').addEventListener('click',()=>request('login',{}).then(r=>ids.forEach(id=>show(id,r.message))).catch(e=>ids.forEach(id=>show(id,e.message))));
       panel.querySelectorAll('[data-ops-refresh]').forEach(el=>el.addEventListener('click',()=>sync(el.dataset.opsRefresh,true)));
       panel.querySelectorAll('[data-ops-auto]').forEach(el=>el.addEventListener('change',()=>{const id=el.dataset.opsAuto;enabled[id]=el.checked;document.querySelectorAll('[data-ops-auto="'+id+'"]').forEach(x=>x.checked=el.checked);try{localStorage.setItem('hedax-ops-enabled',JSON.stringify(enabled));}catch{};}));
       panel.querySelector('.ops-login').addEventListener('click',()=>request('login',{}).then(r=>ids.forEach(id=>show(id,r.message))).catch(e=>ids.forEach(id=>show(id,e.message))));
@@ -3714,7 +3781,8 @@ const OperationsSync=(()=>{
 <script>
 /* Managerial overview consumes the same normalized sources as the detailed tabs. */
 function managementMetrics(sources, derived, dateKey) {
-  const reception=sources.t?computeReceptionStats(sources.t.records,dateKey,'performed'):null;
+  const covered=receptionCovers(sources.t,dateKey),reception=sources.t&&covered?computeReceptionStats(sources.t.records,dateKey,'performed'):null;
+  const flow=reception?receptionFlow(reception,dateKey):null;
   const nobat=sources.n?computeNobatStats(sources.n.records):null;
   const orders=sources.b?(derived?.scores||[]).filter(r=>r.shortfall>0).slice().sort((a,b)=>b.score-a.score||b.shortfall-a.shortfall):null;
   const slow=sources.b?sources.b.records.filter(b=>['کند گردش','راکد'].includes(classifyTurnover(b.turnover))):null;
@@ -3726,12 +3794,14 @@ function managementMetrics(sources, derived, dateKey) {
   const oilShort=orders?orders.filter(r=>isOilOrFilter(r.b.desc)):null;
   const lastDate=sources.t?sources.t.records.map(r=>receptionDate(r.admissionDate)).filter(d=>d.valid).sort((a,b)=>b.jdn-a.jdn)[0]:null;
   const emdad=sources.p?monthlyEmdadSeries(sources.p.records,'all'):null;
-  return {dateKey,reception,nobat,orders,slow,slowValue:slowMatched?slowValue:null,slowMatched,oil,oilShort,lastDate,emdad};
+  return {dateKey,reception,flow,covered,nobat,orders,slow,slowValue:slowMatched?slowValue:null,slowMatched,oil,oilShort,lastDate,emdad};
 }
 function managementSummaryRows(m,sources) {
   const r=m.reception,k=r?.kindCounts,scope='روز '+m.dateKey+'؛ در محدودهٔ فایل پذیرش';
   const rows=[
     {indicator:'پذیرش ثبت‌شده',value:r?r.daily.length:null,scope,action:'reception'},
+    {indicator:'پذیرش تجمعی سال در فایل',value:m.flow?.admissions??null,scope:'کارت‌های موجود در فایل؛ از اول سال تا '+m.dateKey,action:'reception'},
+    {indicator:'ترخیص واقعی در روز',value:m.flow?.releasedToday??null,scope,action:'reception'},
     {indicator:'خودروهای مانده از روزهای قبل',value:r?r.stopped.length:null,scope,action:'reception'},
     {indicator:'تعمیرات انجام‌شده',value:r?.known?k.repair+k.both:null,scope,action:'reception'},
     {indicator:'سرویس و روغن انجام‌شده',value:r?.known?k.service+k.both:null,scope,action:'reception'},
@@ -3759,13 +3829,17 @@ function renderManagementOverview() {
   host.innerHTML=`<div class="management-heading"><div><h2>کنترل نمایندگی</h2><p class="muted-note">پذیرش، توقف خودرو و اقدام‌های مربوط به قطعه — از آخرین گزارش‌های ذخیره‌شده</p></div><button type="button" class="btn btn-ghost" data-management-data>مدیریت داده‌ها و اتصال B2B</button></div>
     <div class="management-day no-print"><label for="managementDay">روز تحلیل پذیرش</label><input id="managementDay" inputmode="numeric" value="${esc(day)}"><button class="btn btn-ghost btn-sm" id="managementToday" type="button">امروز</button>${latest&&latest!==day?'<button class="btn btn-ghost btn-sm" id="managementLatest" type="button">آخرین روز موجود: '+esc(latest)+'</button>':''}</div>
     <p class="muted-note">${r?'آمار پذیرش برای '+esc(day)+' است. آخرین تاریخ پذیرش موجود در فایل: '+esc(latest||'نامشخص')+'. خودروهای خارج از بازهٔ فایل در شمارش توقف نیستند.':'دادهٔ پذیرش هنوز موجود نیست؛ شاخص‌های آن تا دریافت فایل نامشخص می‌مانند.'}</p>
+    ${S.t&&!m.covered?'<p class="muted-note">روز انتخابی خارج از پوشش گزارش '+esc(S.t.meta.fromDate)+' تا '+esc(S.t.meta.toDate)+' است؛ شاخص روز نامشخص می‌ماند. دریافت تازه یا آخرین روز موجود را انتخاب کنید.</p>':''}
     <div class="grid12 management-kpis">
       ${kpiCard('پذیرش ثبت‌شده در روز',{html:display(r?.daily.length)},foot('کارت یکتا؛ شامل انصرافی‌ها'))}
       ${kpiCard('مانده از روزهای قبل',{html:display(r?.stopped.length)},foot('فاقد ترخیص تا پایان روز؛ در محدودهٔ فایل'))}
+      ${kpiCard('پذیرش تجمعی سال در فایل',{html:display(m.flow?.admissions)},foot('کارت یکتا در محدودهٔ دریافت‌شده تا روز انتخابی'))}
+      ${kpiCard('ترخیص واقعی در روز',{html:display(m.flow?.releasedToday)},foot('تاریخ ترخیص واقعی؛ بدون انصرافی'))}
       ${kpiCard('اقلام دارای کسری سفارش',{html:display(m.orders?.length)},foot('موجودی در راه در محاسبه لحاظ شده است'))}
       ${kpiCard('ارزش موجودی کندگردش و راکد',{html:m.slowValue===null?'—':esc(fmtRial(m.slowValue))},foot('به قیمت فروش؛ '+display(m.slowMatched)+' از '+display(m.slow?.length)+' قلم تطبیق‌یافته'))}
     </div>
     <div class="grid12 management-charts">
+      <section class="col-12 card"><h3 class="card-title">روند ماهانهٔ پذیرش و ترخیص واقعی</h3><p class="micro">کارت‌های موجود در فایل؛ ماه جاری تا روز انتخابی. ترخیص کارت‌های سال قبل خارج از پوشش گزارش سال جاری است.</p><div id="mgMonthlyFlow">${r?'':missing('پذیرش تا ترخیص')}</div></section>
       <section class="col-6 card"><div class="management-heading"><h3 class="card-title">روند پذیرش در ۱۴ روز</h3>${link('reception','جدول پذیرش‌ها')}</div><div id="mgReceptionTrend">${r?'':missing('پذیرش تا ترخیص')}</div></section>
       <section class="col-6 card"><div class="management-heading"><h3 class="card-title">عملکرد پذیرشگران در روز انتخاب‌شده</h3>${link('reception','جزئیات هر پذیرشگر')}</div><div id="mgStaff">${r?'':missing('پذیرش تا ترخیص')}</div></section>
       <section class="col-6 card"><div class="management-heading"><h3 class="card-title">خودروهای متوقف؛ اولویت پیگیری بر اساس مدت</h3>${link('reception','لیست خودروهای متوقف')}</div><div id="mgStopped">${r?'':missing('پذیرش تا ترخیص')}</div><p class="micro">توقف بیش از ۱۴ روز: ${display(r?r.age[3].count:null)} خودرو؛ وضعیت توقف نامشخص: ${display(r?.uncertain)}</p></section>
@@ -3779,6 +3853,7 @@ function renderManagementOverview() {
   document.getElementById('managementChartsHost').replaceChildren(host.querySelector('.management-charts'));
   document.getElementById('managementSummaryHost').replaceChildren(host.querySelector('.management-summary'));
   const bars=(id,labels,values)=>renderBarChart(document.getElementById(id),labels,[{name:'تعداد',values,color:'var(--teal)',format:fmtInt}],{legend:false});
+  if(m.flow)renderLineChart(document.getElementById('mgMonthlyFlow'),m.flow.months.map(x=>x.label),[{name:'پذیرش',values:m.flow.months.map(x=>x.admissions),color:'var(--teal)'},{name:'ترخیص واقعی',values:m.flow.months.map(x=>x.releases),color:'var(--gold)'}],{legend:true});
   if(r){renderLineChart(document.getElementById('mgReceptionTrend'),r.trend.map(x=>x.label.slice(5)),[{name:'پذیرش ثبت‌شده',values:r.trend.map(x=>x.count),color:'var(--teal)'}],{legend:false});
     if(r.staff.length)bars('mgStaff',r.staff.map(x=>x.name),r.staff.map(x=>x.count));else document.getElementById('mgStaff').innerHTML=foot('برای این روز در فایل پذیرشی ثبت نشده است.');
     bars('mgStopped',r.age.map(x=>x.label),r.age.map(x=>x.count));

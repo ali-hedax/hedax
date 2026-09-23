@@ -18,6 +18,10 @@ if not exist node_modules\playwright (
     exit /b 1
   )
 )
+"%HEDAX_NODE%" companion\start.cjs
+if errorlevel 1 (
+  pause
+  exit /b 1
+)
 start "HEDAX" http://localhost:5173/
-"%HEDAX_NODE%" companion\server.cjs
-pause
+exit /b 0
