@@ -4,6 +4,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const {B2BClient, validateScope} = require('./b2b.cjs');
+const {BUILD,browserConfig}=require('./config.cjs');
 const ROOT = path.resolve(__dirname, '..');
 function createServer({client, port=5173, root=ROOT} = {}) {
   const token = crypto.randomBytes(32).toString('hex');
@@ -16,7 +17,7 @@ function createServer({client, port=5173, root=ROOT} = {}) {
       if (req.headers.origin && !origins.has(req.headers.origin)) return json(res,403,{message:'Origin rejected'});
       if (req.headers['sec-fetch-site'] === 'cross-site') return json(res,403,{message:'Cross-site rejected'});
       const url = new URL(req.url,'http://localhost:' + port);
-      if (req.method === 'GET' && url.pathname === '/api/b2b/session') return json(res,200,{token,version:1});
+      if (req.method === 'GET' && url.pathname === '/api/b2b/session') return json(res,200,{token,version:1,build:BUILD,browser:client.channel||'chrome'});
       if (req.method === 'POST' && ['/api/b2b/sync','/api/b2b/login','/api/b2b/report'].includes(url.pathname)) {
         if (req.headers['x-hedax-token'] !== token || !origins.has(req.headers.origin)) return json(res,403,{message:'Request rejected'});
         if (!(req.headers['content-type'] || '').startsWith('application/json')) return json(res,415,{message:'JSON required'});
@@ -36,14 +37,13 @@ function createServer({client, port=5173, root=ROOT} = {}) {
       return json(res,404,{message:'Not found'});
     } catch (err) {
       return json(res,err.code === 'BUSY' ? 409 : err.code === 'INVALID_SCOPE' ? 400 : err.code === 'LOGIN_REQUIRED' ? 401 : 502,
-        {code:err.code || 'COMPANION_ERROR', message:err.code ? err.message : 'همراه محلی آماده نیست. اجرای برنامه و مرورگر Edge را بررسی کنید.'});
+        {code:err.code || 'COMPANION_ERROR', message:err.code ? err.message : 'همراه محلی آماده نیست. اجرای برنامه و مرورگر Google Chrome را بررسی کنید.'});
     }
   });
 }
 if (require.main === module) {
   const port = Number(process.env.HEDAX_PORT || 5173);
-  const profileDir = process.env.HEDAX_PROFILE_DIR || path.join(ROOT,'.local','b2b-profile');
-  const client = new B2BClient({profileDir, channel:process.env.HEDAX_BROWSER_CHANNEL || 'msedge'});
+  const client = new B2BClient(browserConfig(ROOT));
   const server = createServer({client,port});
   server.requestTimeout = 180000;
   server.on('error', err => { console.error(err.code === 'EADDRINUSE' ? 'Port is already in use. Close the old HEDAX preview first.' : 'HEDAX server could not start.'); process.exitCode=1; });

@@ -26,7 +26,7 @@ async function selectReportValue(page, name, value) {
   if ((await field.inputValue()).trim() !== value.trim()) throw failure('FILTER_MISMATCH', 'فیلتر انتخاب‌شده تأیید نشد.');
 }
 class B2BClient {
-  constructor({profileDir, chromium, channel='msedge'} = {}) {
+  constructor({profileDir, chromium, channel='chrome'} = {}) {
     this.profileDir = profileDir; this.chromium = chromium; this.channel = channel;
     this.context = null; this.page = null; this.launching = null; this.busy = false;
   }
@@ -42,7 +42,7 @@ class B2BClient {
           viewport:null, timeout:30000
         });
       } catch {
-        throw failure('BROWSER_START_FAILED', 'مرورگر Edge اجرا نشد. همراه هداکس را ببندید و فایل start-hedax.cmd را از خود ویندوز اجرا کنید.');
+        throw failure('BROWSER_START_FAILED', 'مرورگر Google Chrome اجرا نشد. نصب Chrome را بررسی کنید و فایل start-hedax.cmd را از خود ویندوز اجرا کنید.');
       }
       this.context.on('close', () => { this.context = null; this.page = null; });
       this.page = this.context.pages()[0] || await this.context.newPage();
@@ -54,10 +54,13 @@ class B2BClient {
   }
   async login() {
     if (this.busy) throw failure('BUSY', 'دریافت گزارش در حال اجراست.');
-    const page = await this.open();
-    await page.bringToFront();
-    if (!page.url().startsWith('https://b2b.isaco.ir/')) await page.goto(REPORT_URL);
-    return {message:'ورود را در پنجرهٔ B2B انجام دهید؛ سپس «به‌روزرسانی اکنون» را بزنید.'};
+    this.busy=true;
+    try {
+      const page = await this.open();
+      await page.bringToFront();
+      if (!page.url().startsWith('https://b2b.isaco.ir/')) await page.goto(REPORT_URL);
+      return {message:'ورود را در پنجرهٔ Google Chrome بازشده برای B2B انجام دهید؛ سپس دکمهٔ دریافت گزارش را بزنید.'};
+    } finally { this.busy=false; }
   }
   async sync(input) {
     const scope = validateScope(input);
@@ -71,7 +74,7 @@ class B2BClient {
       const report = page.getByRole('listbox', {name:'گزارش', exact:true});
       try { await report.waitFor({state:'visible', timeout:15000}); }
       catch {
-        if (new URL(page.url()).pathname !== '/PlanningReport') throw failure('LOGIN_REQUIRED', 'ورود B2B لازم است. در پنجرهٔ بازشده وارد شوید و دوباره تلاش کنید.');
+        if (new URL(page.url()).pathname !== '/PlanningReport') throw failure('LOGIN_REQUIRED', 'ورود B2B لازم است. در پنجرهٔ Google Chrome همراه هداکس وارد شوید و دوباره دریافت را بزنید.');
         throw failure('PAGE_CHANGED', 'فهرست گزارش نوبت‌دهی پیدا نشد؛ صفحهٔ B2B را بررسی کنید.');
       }
       if (new URL(page.url()).origin !== 'https://b2b.isaco.ir') throw failure('LOGIN_REQUIRED', 'ورود B2B کامل نشده است.');

@@ -428,7 +428,7 @@ button, select, input { font-family: inherit; }
 
 
       <div class="card ops-quick no-print" aria-label="دریافت نوبت‌دهی از B2B">
-        <div class="ops-controls"><button id="b2bQuickRefresh" type="button" class="btn btn-primary">دریافت نوبت‌دهی از B2B</button><button id="b2bQuickLogin" type="button" class="btn btn-ghost">ورود به B2B</button><button id="b2bQuickSettings" type="button" class="btn btn-ghost">تاریخ و تنظیمات</button></div>
+        <div class="ops-controls"><button id="b2bQuickRefresh" type="button" class="btn btn-primary">دریافت نوبت‌دهی از B2B</button><button id="b2bQuickLogin" type="button" class="btn btn-ghost">ورود به B2B در Chrome</button><button id="b2bQuickSettings" type="button" class="btn btn-ghost">تاریخ و تنظیمات</button></div>
         <p class="micro">گزارش روزانه با تاریخ و سالن انتخابی؛ پذیرش و نام پذیرشگر در بخش «پذیرش تا ترخیص» تحلیل می‌شود.</p><p id="b2bQuickMessage" role="status" aria-live="polite">آمادهٔ دریافت گزارش؛ وضعیت اتصال اینجا نمایش داده می‌شود.</p>
       </div>
       <div id="nobatBody"></div>
@@ -443,7 +443,7 @@ button, select, input { font-family: inherit; }
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:10px">
           <button id="b2bRefresh" class="btn btn-primary" type="button" style="min-height:44px">به‌روزرسانی اکنون</button>
-          <button id="b2bLogin" class="btn btn-ghost" type="button" style="min-height:44px">ورود به B2B</button>
+          <button id="b2bLogin" class="btn btn-ghost" type="button" style="min-height:44px">ورود به B2B در Chrome</button>
         </div>
         <p id="b2bMessage" role="status" aria-live="polite">در اولین اتصال، ورود را در پنجرهٔ B2B انجام دهید. پس از پایان اعتبار ورود، ورود دوباره لازم است.</p>
         <p class="muted-note">تنها گزارش دریافت می‌شود. آخرین دادهٔ معتبر تا پایان دریافت و ذخیرهٔ گزارش جدید باقی می‌ماند.</p>
@@ -3519,11 +3519,13 @@ document.addEventListener("DOMContentLoaded", initApp);
 // All modules share one transport queue because the companion controls one browser.
 const B2BRequests=(()=>{
   let tail=Promise.resolve(),token=null;
-  async function send(route,body){
+  async function send(route,body,retryToken=true){
     try{
-      if(!token){const r=await fetch('/api/b2b/session',{cache:'no-store',signal:AbortSignal.timeout(5000)});if(!r.ok)throw Error('همراه هداکس آماده نیست؛ start-hedax.cmd را اجرا کنید.');const v=await r.json();if(!v.token)throw Error('این صفحه به همراه هداکس متصل نیست.');token=v.token;}
+      if(!token){const r=await fetch('/api/b2b/session',{cache:'no-store',signal:AbortSignal.timeout(5000)});if(!r.ok)throw Error('همراه هداکس آماده نیست؛ start-hedax.cmd را اجرا کنید.');const v=await r.json();if(!v||v.version!==1||v.browser!=='chrome')throw Object.assign(Error('همراه هداکس برای Google Chrome به‌روز نشده است. فایل start-hedax.cmd را از پوشهٔ برنامه اجرا کنید؛ سپس دوباره دریافت را بزنید.'),{code:'COMPANION_OUTDATED'});if(typeof v.token!=='string'||!v.token)throw Error('این صفحه به همراه هداکس متصل نیست.');token=v.token;}
       const r=await fetch('/api/b2b/'+route,{method:'POST',headers:{'Content-Type':'application/json','X-Hedax-Token':token},body:JSON.stringify(body),signal:AbortSignal.timeout(240000)});
-      const result=await r.json();if(!r.ok){if(r.status===403)token=null;throw Object.assign(Error(result.message||'دریافت ناموفق بود.'),{code:result.code});}return result;
+      // A 403 is rejected by the companion before any browser action; retry that rejection once with its new token.
+      if(r.status===403){token=null;if(retryToken)return send(route,body,false);}
+      const result=await r.json();if(!r.ok){throw Object.assign(Error(result.message||'دریافت ناموفق بود.'),{code:result.code});}return result;
     }catch(e){if(e instanceof TypeError||e instanceof SyntaxError){token=null;throw Error('ارتباط با همراه هداکس برقرار نیست. start-hedax.cmd را اجرا کنید و دوباره دریافت را بزنید.');}throw e;}
   }
   return {request:(route,body)=>{const next=tail.catch(()=>{}).then(()=>send(route,body));tail=next;return next;}};
@@ -3751,10 +3753,10 @@ const OperationsSync=(()=>{
     Object.entries(tabs).forEach(([tab,ids])=>{
       const parent=document.getElementById('tab-'+tab);if(!parent||parent.querySelector('.ops-panel'))return;
       const panel=document.createElement('details');panel.className='card ops-panel no-print';panel.setAttribute('aria-label','دریافت گزارش‌های B2B');
-      panel.innerHTML='<summary>به‌روزرسانی داده‌های مبنای تحلیل از B2B</summary>'+ids.map(id=>'<div class="ops-source" data-ops-source="'+id+'"><div class="ops-controls"><strong>'+names[id]+'</strong><label><input type="checkbox" data-ops-auto="'+id+'" '+(enabled[id]?'checked':'')+'> خودکار</label><button type="button" class="btn btn-ghost btn-sm" data-ops-refresh="'+id+'">به‌روزرسانی اکنون</button></div><p class="muted-note" role="status" aria-live="polite" data-ops-status="'+id+'"></p></div>').join('')+'<button type="button" class="btn btn-ghost btn-sm ops-login">ورود به B2B</button>';
+      panel.innerHTML='<summary>به‌روزرسانی داده‌های مبنای تحلیل از B2B</summary>'+ids.map(id=>'<div class="ops-source" data-ops-source="'+id+'"><div class="ops-controls"><strong>'+names[id]+'</strong><label><input type="checkbox" data-ops-auto="'+id+'" '+(enabled[id]?'checked':'')+'> خودکار</label><button type="button" class="btn btn-ghost btn-sm" data-ops-refresh="'+id+'">به‌روزرسانی اکنون</button></div><p class="muted-note" role="status" aria-live="polite" data-ops-status="'+id+'"></p></div>').join('')+'<button type="button" class="btn btn-ghost btn-sm ops-login">ورود به B2B در Chrome</button>';
       if(tab==='dashboard')document.getElementById('managementSyncSlot').appendChild(panel);else parent.appendChild(panel);
       const quick=document.createElement('div');quick.className='card ops-quick no-print';quick.setAttribute('aria-label','اتصال B2B');
-      quick.innerHTML='<div class="ops-controls">'+ids.map(id=>'<button class="btn btn-primary" type="button" data-ops-refresh="'+id+'">دریافت '+names[id]+' از B2B</button>').join('')+'<button type="button" class="btn btn-ghost ops-login">ورود به B2B</button></div><p class="micro">'+(ids.includes('t')?'پذیرش: به‌روزرسانی هفتگی؛ دریافت از اول سال در بخش‌های کوچک برای کنترل سقف ۱۰۰۰ مورد. ': '')+(ids.includes('p')?'امداد: از اول سال تا امروز، از ساعت ۱۰ صبح. ':'')+(ids.includes('alef')||ids.includes('b')?'موجودی و DPLAN: آخرین وضعیت سال جاری.':'')+'</p>'+ids.map(id=>'<p class="micro" role="status" aria-live="polite"><strong>'+names[id]+': </strong><span data-ops-status="'+id+'"></span></p>').join('');
+      quick.innerHTML='<div class="ops-controls">'+ids.map(id=>'<button class="btn btn-primary" type="button" data-ops-refresh="'+id+'">دریافت '+names[id]+' از B2B</button>').join('')+'<button type="button" class="btn btn-ghost ops-login">ورود به B2B در Chrome</button></div><p class="micro">'+(ids.includes('t')?'پذیرش: به‌روزرسانی هفتگی؛ دریافت از اول سال در بخش‌های کوچک برای کنترل سقف ۱۰۰۰ مورد. ': '')+(ids.includes('p')?'امداد: از اول سال تا امروز، از ساعت ۱۰ صبح. ':'')+(ids.includes('alef')||ids.includes('b')?'موجودی و DPLAN: آخرین وضعیت سال جاری.':'')+'</p>'+ids.map(id=>'<p class="micro" role="status" aria-live="polite"><strong>'+names[id]+': </strong><span data-ops-status="'+id+'"></span></p>').join('');
       parent.querySelector('.section-sub').insertAdjacentElement('afterend',quick);
       quick.querySelectorAll('[data-ops-refresh]').forEach(el=>el.addEventListener('click',()=>sync(el.dataset.opsRefresh,true)));
       quick.querySelector('.ops-login').addEventListener('click',()=>request('login',{}).then(r=>ids.forEach(id=>show(id,r.message))).catch(e=>ids.forEach(id=>show(id,e.message))));
