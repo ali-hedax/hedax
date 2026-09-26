@@ -20,7 +20,7 @@ const EXPORTS = [
   "computeNobatStats", "nobatScopeKey", "nobatScopeLabel", "classifyIncomingReport",
   "latestPerScope", "revisionsOfScope", "hashBytes", "NobatStore", "buildNobatReport",
   "NOBAT_EMPTY_STATUS", "NOBAT_STATUS_ALL", "NOBAT_HALL_DEFAULT", "STATE",
-  "B2BGate", "B2BRequests", "nobatDue", "operationDue", "operationsToday", "operationsScope", "OperationsSync", "B2BSync", "computeReceptionStats", "receptionFlow", "receptionCovers", "receptionDate", "receptionPartitions", "renderNobat", "renderReception", "renderDashboard", "activeNobatReport", "setActiveNobatSource", "fmtJalaliDateTime", "loadNobatFromStore", "TAB_RENDERERS", "TAB_TITLES",
+  "B2BGate", "B2BRequests", "nobatDue", "operationDue", "operationsToday", "operationsScope", "OperationsSync", "B2BSync", "computeReceptionStats", "receptionFlow", "receptionCovers", "receptionDate", "receptionPartitions", "receptionWeekScope", "receptionCardKey", "mergeReceptionRecords", "mergeReceptionCoverage", "receptionCoverageSpans", "receptionCoverageLabel", "fetchReceptionWindow", "renderNobat", "renderReception", "renderDashboard", "activeNobatReport", "setActiveNobatSource", "fmtJalaliDateTime", "loadNobatFromStore", "TAB_RENDERERS", "TAB_TITLES",
 ];
 
 function extractScripts(html) {

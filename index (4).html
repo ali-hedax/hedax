@@ -3052,28 +3052,40 @@ function computeReceptionStats(records, dateKey, basis='performed') {
 function receptionCovers(source,dateKey){
   const day=receptionDate(dateKey),meta=source?.meta;
   if(!day.valid)return false;
-  if(meta?.origin==='b2b'&&meta.fromDate&&meta.toDate){const from=receptionDate(meta.fromDate),to=receptionDate(meta.toDate);return from.valid&&to.valid&&day.jdn>=from.jdn&&day.jdn<=to.jdn;}
+  if(meta?.origin==='b2b'){
+    const spans=receptionCoverageSpans(meta);
+    if(!spans.length)return false;
+    // A day between two fetched weeks is not covered; it is unknown, not zero.
+    return spans.some(x=>{const a=receptionDate(x.fromDate),b=receptionDate(x.toDate);return a.valid&&b.valid&&day.jdn>=a.jdn&&day.jdn<=b.jdn;});
+  }
   return true; // Manual files have no confirmed scope; all labels remain file-scoped.
 }
-function receptionFlow(stats,dateKey){
+/* آمار فقط از ماه‌هایی ساخته می‌شود که واقعاً گزارشی برایشان دریافت شده؛
+   ماهِ بدون دریافت «نامشخص» است و صفر نمایش داده نمی‌شود. */
+function receptionFlow(stats,dateKey,meta){
   const day=receptionDate(dateKey),rows=stats.rows.filter(r=>r.admission.valid&&r.admission.jy===day.jy&&r.admission.jdn<=day.jdn&&!r.dateConflict);
   const releases=rows.filter(r=>!r.cancelled&&r.release.valid&&r.release.jdn<=day.jdn);
-  const months=Array.from({length:day.jm},(_,i)=>({label:JMONTHS[i],admissions:rows.filter(r=>r.admission.jm===i+1).length,releases:releases.filter(r=>r.release.jy===day.jy&&r.release.jm===i+1).length}));
-  return {admissions:rows.length,releasedToday:releases.filter(r=>r.release.jdn===day.jdn).length,months};
+  const spans=receptionCoverageSpans(meta).map(x=>({a:receptionDate(x.fromDate),b:receptionDate(x.toDate)})).filter(x=>x.a.valid&&x.b.valid);
+  const covered=m=>!spans.length||spans.some(x=>!(x.b.jy<day.jy||x.a.jy>day.jy)&&!(x.b.jy===day.jy&&x.b.jm<m)&&!(x.a.jy===day.jy&&x.a.jm>m));
+  const months=Array.from({length:day.jm},(_,i)=>i+1).filter(covered)
+    .map(m=>({label:JMONTHS[m-1],admissions:rows.filter(r=>r.admission.jm===m).length,releases:releases.filter(r=>r.release.jy===day.jy&&r.release.jm===m).length}));
+  return {admissions:rows.length,releasedToday:releases.filter(r=>r.release.jdn===day.jdn).length,months,coveredMonths:months.length};
 }
 function renderReception() {
   const body=document.getElementById('receptionBody'), source=STATE.sources.t;
   if(!source){body.innerHTML=emptyState('برای این گزارش، فایل «پذیرش تا ترخیص» را دریافت یا بارگذاری کنید.',true);wireEmptyStateButtons(body);return;}
   const dateKey=STATE.receptionDay||operationsToday().dateKey, basis=STATE.receptionBasis||'performed';
   if(!receptionCovers(source,dateKey)){
-    body.innerHTML='<div class="card"><h3>گزارش این روز هنوز دریافت نشده است</h3><p>آخرین پوشش گزارش: '+esc(source.meta.fromDate)+' تا '+esc(source.meta.toDate)+'. نبود گزارش به معنی صفر پذیرش یا صفر توقف نیست.</p><button class="btn btn-primary" id="recCoveredDay" type="button">نمایش آخرین روز گزارش</button><p>برای تازه‌سازی، دکمهٔ دریافت از B2B در بالای همین بخش را بزنید.</p></div>';
+    body.innerHTML='<div class="card"><h3>گزارش این روز هنوز دریافت نشده است</h3><p>محدودهٔ دریافت‌شده: '+esc(receptionCoverageLabel(source.meta))+'. نبود گزارش به معنی صفر پذیرش یا صفر توقف نیست.</p><button class="btn btn-primary" id="recCoveredDay" type="button">نمایش آخرین روز گزارش</button><p>برای تازه‌سازی، دکمهٔ دریافت از B2B در بالای همین بخش را بزنید.</p></div>';
     document.getElementById('recCoveredDay').addEventListener('click',()=>{STATE.receptionDay=source.meta.toDate;renderReception();});return;
   }
-  const s=computeReceptionStats(source.records,dateKey,basis), kc=s.kindCounts,flow=receptionFlow(s,dateKey);
+  const s=computeReceptionStats(source.records,dateKey,basis), kc=s.kindCounts,flow=receptionFlow(s,dateKey,source.meta);
   const validHours=s.rows.filter(r=>!r.cancelled&&r.hours!==null).map(r=>r.hours),avgH=meanOf(validHours),medH=medianOf(validHours);
   const serviceTitle=basis==='performed'?'خدمات انجام‌شده':'نوع مراجعه از توضیحات پذیرش';
   const value=n=>s.known?fmtInt(n):'—';
-  const period=source.meta?('محدودهٔ گزارش: '+(source.meta.fromDate||source.meta.dateKey||'—')+' تا '+(source.meta.toDate||source.meta.dateKey||'—')+' · دریافت: '+fmtJalaliDateTime(source.meta.receivedAt)):'محدودهٔ زمانی فایل دستی تأیید نشده است؛ آمار فقط از ردیف‌های همین فایل ساخته می‌شود.';
+  const period=source.meta&&source.meta.origin==='b2b'
+    ?('محدودهٔ دریافت‌شده: '+receptionCoverageLabel(source.meta)+' · آخرین دریافت: '+(source.meta.windowFrom?source.meta.windowFrom+' تا '+source.meta.windowTo+' در ':'')+fmtJalaliDateTime(source.meta.receivedAt)+'. روزهای بیرون از این محدوده دریافت نشده‌اند، نه صفر.')
+    :'محدودهٔ زمانی فایل دستی تأیید نشده است؛ آمار فقط از ردیف‌های همین فایل ساخته می‌شود.';
   body.innerHTML=`<div class="card" style="margin-bottom:16px"><div class="ops-controls">
     <label for="recDay">روز گزارش <input id="recDay" inputmode="numeric" value="${esc(dateKey)}" style="width:140px"></label>
     <button class="btn btn-ghost" id="recToday" type="button">امروز</button>
@@ -3085,10 +3097,10 @@ function renderReception() {
     ${kpiCard('خودروهای مانده از روزهای قبل',{html:fmtInt(s.stopped.length)},'در محدودهٔ گزارش؛ پایان روز انتخاب‌شده')}
     ${kpiCard('تعمیرات'+(basis==='performed'?' انجام‌شده':' درخواستی'),{html:value(kc.repair+kc.both)},'بدون انصرافی؛ شامل موارد تعمیر و سرویس مشترک')}
     ${kpiCard('سرویس دوره‌ای و روغن',{html:value(kc.service+kc.both)},basis==='performed'?'خدمات ثبت‌شده':'تشخیص از متن؛ انجام خدمت را تأیید نمی‌کند')}
-    ${kpiCard('پذیرش تجمعی سال در فایل',{html:fmtInt(flow.admissions)},'کارت یکتا تا روز انتخابی؛ فقط محدودهٔ دریافت‌شده')}${kpiCard('ترخیص واقعی در روز',{html:fmtInt(flow.releasedToday)},'بر اساس تاریخ ترخیص؛ بدون انصرافی')}
+    ${kpiCard('پذیرش در محدودهٔ دریافت‌شده',{html:fmtInt(flow.admissions)},'کارت یکتا تا روز انتخابی — فقط روزهایی که گزارششان گرفته شده؛ آمار کامل سال نیست')}${kpiCard('ترخیص واقعی در روز',{html:fmtInt(flow.releasedToday)},'بر اساس تاریخ ترخیص؛ بدون انصرافی')}
     ${kpiCard('انصرافی روز',{html:fmtInt(s.cancelled)})}${kpiCard('نوع خدمت نامشخص',{html:fmtInt(kc.unknown)})}</div>
     <div class="card" style="margin-bottom:16px"><h3 class="card-title">پذیرش به تفکیک پذیرشگر — ${esc(dateKey)}</h3><div class="grid12">${s.staff.map(x=>kpiCard(x.name,{html:fmtInt(x.count)})).join('')||'<p>پذیرشی برای این روز در فایل موجود نیست.</p>'}</div><div id="recByStaff"></div></div>
-    <div class="card" style="margin-bottom:16px"><h3 class="card-title">ورودی و خروجی تعمیرگاه در ماه‌های سال</h3><p class="micro">پذیرش ثبت‌شده و ترخیص واقعی کارت‌های موجود در فایل؛ ماه جاری تا روز انتخابی.</p><div id="recMonthlyFlow"></div></div>
+    <div class="card" style="margin-bottom:16px"><h3 class="card-title">ورودی و خروجی تعمیرگاه در ماه‌های دریافت‌شده</h3><p class="micro">فقط ماه‌هایی که گزارششان دریافت شده نمایش داده می‌شوند (${fmtInt(flow.coveredMonths)} ماه). محدودهٔ دریافت‌شده: ${esc(receptionCoverageLabel(source.meta))}. ماه بدون دریافت نامشخص است، نه صفر.</p><div id="recMonthlyFlow"></div></div>
     <div class="card" style="margin-bottom:16px"><h3 class="card-title">پذیرش روزانه در ۱۴ روز منتهی به روز انتخاب‌شده</h3><div id="recDailyChart"></div></div>
     <div class="card" style="margin-bottom:16px"><h3 class="card-title">${esc(serviceTitle)}</h3><p class="muted-note">${basis==='performed'?'فقط ریز خدمات انجام‌شده یا نوع خدمت همراه تأیید اتمام، مبنای آمار قطعی است. شرح مشتری و ترخیص به‌تنهایی اثبات انجام تعمیر نیست.':'این نمودار از متن توضیحات پذیرش استخراج شده است و آمار قطعی خدمات انجام‌شده نیست.'} دو کارت بالای صفحه می‌توانند هم‌پوشان باشند؛ نمودار زیر گروه‌های جدا دارد.</p><div id="recServiceChart"></div></div>
     <div class="card" style="margin-bottom:16px"><h3 class="card-title">خودروهای متوقف از روزهای قبل</h3><p class="muted-note">فاقد ترخیص تا پایان روز انتخاب‌شده و دارای وضعیت فعال؛ پذیرش‌های خارج از بازهٔ فایل و موارد نامشخص در این عدد نیستند.</p><div id="recStoppedChart"></div><div id="recStoppedTable"></div></div>
@@ -3940,6 +3952,8 @@ function operationsScope(sourceId,now=new Date()) {
   const t=operationsToday(now);
   if(sourceId==='alef') return {sourceId,dateKey:t.dateKey,warehouse:'انبار قطعات ولوازم یدکی'};
   if(sourceId==='b') return {sourceId,dateKey:t.dateKey,year:t.year};
+  // امداد ویژه از ابتدای سال؛ پذیرش فقط هفت روز اخیر.
+  if(sourceId==='t') return receptionWeekScope(t.dateKey);
   return {sourceId,fromDate:t.year+'/01/01',toDate:t.dateKey};
 }
 function operationDue(sourceId,source,now=new Date(),force=false) {
@@ -3984,13 +3998,63 @@ async function importOperationReport(payload,expectedScope) {
   STATE.sources[id]=snapshot;renderOperationSnapshot(id);recomputeDerived();renderFileDots();renderActiveTab();
   return {duplicate:!!(previous&&previous.meta&&previous.meta.contentHash===hash),count:res.records.length,excluded:res.diag.rejectedRowCount};
 }
+/* هفت روز شامل هر دو انتها: روز پایان و شش روز پیش از آن. حساب با روز ژولین
+   انجام می‌شود، پس عبور از مرز ماه و سال (از جمله نوروز) درست است. */
+function receptionWeekScope(toDateKey,days=7){
+  const to=receptionDate(toDateKey);
+  if(!to.valid)throw Error('تاریخ پایان بازهٔ پذیرش معتبر نیست.');
+  const from=JAL.d2j(to.jdn-(days-1));
+  return {sourceId:'t',fromDate:jalaliKey(from.jy,from.jm,from.jd),toDate:toDateKey};
+}
+/* کارت یکتا در هر سال پذیرش؛ همان کلیدی که آمار روزانه با آن گروه می‌کند. */
+function receptionCardKey(row){
+  const d=receptionDate(row.admissionDate);
+  return normKey(textCell(row.cardNo))+'|'+(d.valid?d.jy:'undated');
+}
+/* هفتهٔ تازه جای هفته‌های قبل را نمی‌گیرد: کارت‌ها با کلید «شماره کارت + سال»
+   ادغام می‌شوند و مشاهدهٔ تازه‌تر جایگزین قدیمی می‌شود. ردیف‌های دو دریافت
+   ساده به هم چسبانده و دوباره شمرده نمی‌شوند. */
+function mergeReceptionRecords(previous,fresh){
+  const byKey=new Map();
+  for(const r of previous||[])byKey.set(receptionCardKey(r),r);
+  for(const r of fresh||[])byKey.set(receptionCardKey(r),r);
+  return Array.from(byKey.values());
+}
+/* بازه‌های واقعاً دریافت‌شده. بازه‌های هم‌پوشان یا چسبیده یکی می‌شوند؛ فاصلهٔ
+   بین هفته‌ها «دریافت‌نشده» می‌ماند و صفر شمرده نمی‌شود. */
+function mergeReceptionCoverage(previous,range){
+  const key=n=>{const j=JAL.d2j(n);return jalaliKey(j.jy,j.jm,j.jd);};
+  const spans=[...(previous||[]),range].map(r=>{
+    if(!r)return null;
+    const a=receptionDate(r.fromDate),b=receptionDate(r.toDate);
+    return a.valid&&b.valid&&a.jdn<=b.jdn?{a:a.jdn,b:b.jdn,receivedAt:r.receivedAt||0}:null;
+  }).filter(Boolean).sort((x,y)=>x.a-y.a);
+  const out=[];
+  for(const span of spans){
+    const last=out[out.length-1];
+    if(last&&span.a<=last.b+1){last.b=Math.max(last.b,span.b);last.receivedAt=Math.max(last.receivedAt,span.receivedAt);}
+    else out.push({...span});
+  }
+  return out.map(x=>({fromDate:key(x.a),toDate:key(x.b),receivedAt:x.receivedAt}));
+}
+function receptionCoverageSpans(meta){
+  if(!meta)return [];
+  if(Array.isArray(meta.coverage)&&meta.coverage.length)return meta.coverage;
+  return meta.fromDate&&meta.toDate?[{fromDate:meta.fromDate,toDate:meta.toDate,receivedAt:meta.receivedAt}]:[];
+}
+function receptionCoverageLabel(meta){
+  const spans=receptionCoverageSpans(meta);
+  return spans.length?spans.map(x=>x.fromDate+' تا '+x.toDate).join(' ، '):'—';
+}
 function receptionPartitions(fromDate,toDate){
   const from=receptionDate(fromDate),to=receptionDate(toDate);if(!from.valid||!to.valid||from.jdn>to.jdn)throw Error('بازهٔ پذیرش معتبر نیست.');
   const key=n=>{const j=JAL.d2j(n);return jalaliKey(j.jy,j.jm,j.jd);},parts=[];
   for(let n=from.jdn;n<=to.jdn;n+=7)parts.push({sourceId:'t',fromDate:key(n),toDate:key(Math.min(n+6,to.jdn)),part:true});
   return parts;
 }
-async function fetchReceptionYear(request,scope,progress=()=>{},rec=null){
+/* پذیرش فقط بازهٔ خواسته‌شده — پیش‌فرض هفت روز اخیر — را می‌گیرد. اگر بازه به
+   سقف ۱۰۰۰ مورد برسد، همان بازه نصف می‌شود؛ هرگز به ابتدای سال برنمی‌گردد. */
+async function fetchReceptionWindow(request,scope,progress=()=>{},rec=null){
   const ranges=receptionPartitions(scope.fromDate,scope.toDate),accepted=[],seen=new Set();
   let receivedAt=0;
   async function read(part){
@@ -4000,6 +4064,7 @@ async function fetchReceptionYear(request,scope,progress=()=>{},rec=null){
     B2BStages.step(rec,'transfer','ok',part.fromDate+'..'+part.toDate);
     const parsed=await parseOperationPayload(payload,part),rows=parsed.res.records;
     if(rows.length+(parsed.res.diag.rejectedRowCount||0)>=1000){
+      // The cap is handled inside the requested window only.
       const from=receptionDate(part.fromDate).jdn,to=receptionDate(part.toDate).jdn;
       if(from===to)throw Error('حتی گزارش یک روز به سقف ۱۰۰۰ مورد رسیده؛ اطلاعات کامل نیست و جایگزین نشد.');
       const mid=Math.floor((from+to)/2),key=n=>{const j=JAL.d2j(n);return jalaliKey(j.jy,j.jm,j.jd);};
@@ -4011,15 +4076,25 @@ async function fetchReceptionYear(request,scope,progress=()=>{},rec=null){
     accepted.push({scope:part,...parsed});receivedAt=Math.max(receivedAt,payload.receivedAt);
   }
   for(const part of ranges)await read(part);
-  const records=accepted.flatMap(x=>x.res.records),hash=await hashBytes(new TextEncoder().encode(accepted.map(x=>x.hash).join('|')).buffer),previous=STATE.sources.t;
-  const diag={...accepted[0]?.res.diag,fileName:'پذیرش سال جاری — '+accepted.length+' بخش',fileSize:accepted.reduce((n,x)=>n+x.file.size,0),rawRowCount:accepted.reduce((n,x)=>n+x.res.diag.rawRowCount,0),validRowCount:records.length,rejectedRowCount:accepted.reduce((n,x)=>n+(x.res.diag.rejectedRowCount||0),0),grid:null,parts:accepted.map(x=>({scope:x.scope,diag:x.res.diag})),partCount:accepted.length};
-  const snapshot={sourceId:'t',records,diag,meta:{...scope,receivedAt,origin:'b2b',contentHash:hash,fileName:'پذیرش-سال-جاری',partitioned:true,parts:accepted.map(x=>({fromDate:x.scope.fromDate,toDate:x.scope.toDate,rows:x.res.records.length,hash:x.hash}))}};
+  const fresh=accepted.flatMap(x=>x.res.records);
+  const hash=await hashBytes(new TextEncoder().encode(accepted.map(x=>x.hash).join('|')).buffer);
+  const previous=STATE.sources.t,previousMeta=previous&&previous.meta;
+  // Earlier weeks are kept: the new window is merged into what is already
+  // stored, one entry per card per admission year, newest observation winning.
+  const keepHistory=!!(previousMeta&&previousMeta.origin==='b2b');
+  const records=keepHistory?mergeReceptionRecords(previous.records,fresh):fresh;
+  const coverage=mergeReceptionCoverage(keepHistory?receptionCoverageSpans(previousMeta):[],{fromDate:scope.fromDate,toDate:scope.toDate,receivedAt});
+  const windowLabel=scope.fromDate+' تا '+scope.toDate;
+  const diag={...accepted[0]?.res.diag,fileName:'پذیرش '+windowLabel+' — '+accepted.length+' بخش',fileSize:accepted.reduce((n,x)=>n+x.file.size,0),rawRowCount:accepted.reduce((n,x)=>n+x.res.diag.rawRowCount,0),validRowCount:fresh.length,rejectedRowCount:accepted.reduce((n,x)=>n+(x.res.diag.rejectedRowCount||0),0),grid:null,parts:accepted.map(x=>({scope:x.scope,diag:x.res.diag})),partCount:accepted.length};
+  const snapshot={sourceId:'t',records,diag,meta:{...scope,receivedAt,origin:'b2b',contentHash:hash,fileName:'پذیرش-'+scope.fromDate.replaceAll('/','-')+'_'+scope.toDate.replaceAll('/','-'),partitioned:accepted.length>1,coverage,
+    windowFrom:scope.fromDate,windowTo:scope.toDate,windowRows:fresh.length,storedRows:records.length,
+    parts:accepted.map(x=>({fromDate:x.scope.fromDate,toDate:x.scope.toDate,rows:x.res.records.length,hash:x.hash}))}};
   B2BStages.step(rec,'parse','ok',accepted.length+' بخش');
-  // The whole year replaces the stored snapshot only after every part parsed.
+  // The window replaces nothing until every part of it parsed.
   await SourceSnapshots.put(snapshot);
   B2BStages.step(rec,'store','ok');
   STATE.sources.t=snapshot;renderOperationSnapshot('t');recomputeDerived();renderFileDots();renderActiveTab();
-  return {duplicate:previous?.meta?.contentHash===hash,count:records.length,excluded:diag.rejectedRowCount};
+  return {duplicate:previousMeta?.contentHash===hash,count:fresh.length,stored:records.length,excluded:diag.rejectedRowCount,window:windowLabel};
 }
 function renderOperationSnapshot(id) {
   const s=STATE.sources[id],card=document.getElementById('upcard-'+id);if(!s||!card)return;
@@ -4048,7 +4123,7 @@ const OperationsSync=(()=>{
       const result=await B2BGate.guard(async()=>{
         const rec=B2BStages.begin(id);
         show(id,'در حال دریافت '+names[id]+'… گزارش قبلی تا پایان دریافت حفظ می‌شود.');
-        if(id==='t')return fetchReceptionYear(request,scope,msg=>show(id,msg),rec);
+        if(id==='t')return fetchReceptionWindow(request,scope,msg=>show(id,msg),rec);
         let payload;
         try{payload=await request('report',scope);}catch(e){B2BStages.fail(rec,'download',e);throw e;}
         B2BStages.fromCompanion(rec,payload.diagnostics);
@@ -4077,7 +4152,7 @@ const OperationsSync=(()=>{
         +'<div class="ops-archive"><h4 class="card-title">فایل‌های مبنا</h4><p class="micro">فایل موقت Chrome با نام UUID پس از خواندن حذف می‌شود؛ این نسخه‌ها جایگزین آن‌اند.</p><div class="ops-archive-list"></div><button type="button" class="btn btn-ghost btn-sm ops-archive-refresh">به‌روزرسانی فهرست</button></div>';
       if(tab==='dashboard')document.getElementById('managementSyncSlot').appendChild(panel);else parent.appendChild(panel);
       const quick=document.createElement('div');quick.className='card ops-quick no-print';quick.setAttribute('aria-label','اتصال B2B');
-      quick.innerHTML='<div class="ops-controls">'+ids.map(id=>'<button class="btn btn-primary" type="button" data-ops-refresh="'+id+'">دریافت '+names[id]+' از B2B</button>').join('')+'<button type="button" class="btn btn-ghost ops-login">ورود به B2B در Chrome</button></div><p class="micro">'+(ids.includes('t')?'پذیرش: به‌روزرسانی هفتگی؛ دریافت از اول سال در بخش‌های کوچک برای کنترل سقف ۱۰۰۰ مورد. ': '')+(ids.includes('p')?'امداد: از اول سال تا امروز، از ساعت ۱۰ صبح. ':'')+(ids.includes('alef')||ids.includes('b')?'موجودی و DPLAN: آخرین وضعیت سال جاری.':'')+'</p>'+ids.map(id=>'<p class="micro" role="status" aria-live="polite"><strong>'+names[id]+': </strong><span data-ops-status="'+id+'"></span></p>').join('');
+      quick.innerHTML='<div class="ops-controls">'+ids.map(id=>'<button class="btn btn-primary" type="button" data-ops-refresh="'+id+'">دریافت '+names[id]+' از B2B</button>').join('')+'<button type="button" class="btn btn-ghost ops-login">ورود به B2B در Chrome</button></div><p class="micro">'+(ids.includes('t')?'پذیرش: هفت روز اخیر (امروز و شش روز پیش از آن)؛ به‌روزرسانی خودکار هفتگی. هفته‌های قبلی حفظ می‌شوند. ': '')+(ids.includes('p')?'امداد: از اول سال تا امروز، از ساعت ۱۰ صبح. ':'')+(ids.includes('alef')||ids.includes('b')?'موجودی و DPLAN: آخرین وضعیت سال جاری.':'')+'</p>'+ids.map(id=>'<p class="micro" role="status" aria-live="polite"><strong>'+names[id]+': </strong><span data-ops-status="'+id+'"></span></p>').join('');
       parent.querySelector('.section-sub').insertAdjacentElement('afterend',quick);
       quick.querySelectorAll('[data-ops-refresh]').forEach(el=>el.addEventListener('click',()=>sync(el.dataset.opsRefresh,true)));
       quick.querySelector('.ops-login').addEventListener('click',()=>signIn(ids));
@@ -4123,7 +4198,7 @@ const OperationsSync=(()=>{
 /* Managerial overview consumes the same normalized sources as the detailed tabs. */
 function managementMetrics(sources, derived, dateKey) {
   const covered=receptionCovers(sources.t,dateKey),reception=sources.t&&covered?computeReceptionStats(sources.t.records,dateKey,'performed'):null;
-  const flow=reception?receptionFlow(reception,dateKey):null;
+  const flow=reception?receptionFlow(reception,dateKey,sources.t.meta):null;
   const nobat=sources.n?computeNobatStats(sources.n.records):null;
   const orders=sources.b?(derived?.scores||[]).filter(r=>r.shortfall>0).slice().sort((a,b)=>b.score-a.score||b.shortfall-a.shortfall):null;
   const slow=sources.b?sources.b.records.filter(b=>['کند گردش','راکد'].includes(classifyTurnover(b.turnover))):null;
@@ -4141,7 +4216,7 @@ function managementSummaryRows(m,sources) {
   const r=m.reception,k=r?.kindCounts,scope='روز '+m.dateKey+'؛ در محدودهٔ فایل پذیرش';
   const rows=[
     {indicator:'پذیرش ثبت‌شده',value:r?r.daily.length:null,scope,action:'reception'},
-    {indicator:'پذیرش تجمعی سال در فایل',value:m.flow?.admissions??null,scope:'کارت‌های موجود در فایل؛ از اول سال تا '+m.dateKey,action:'reception'},
+    {indicator:'پذیرش در محدودهٔ دریافت‌شده',value:m.flow?.admissions??null,scope:'کارت‌های یکتا در روزهای دریافت‌شده تا '+m.dateKey+'؛ آمار کامل سال نیست',action:'reception'},
     {indicator:'ترخیص واقعی در روز',value:m.flow?.releasedToday??null,scope,action:'reception'},
     {indicator:'خودروهای مانده از روزهای قبل',value:r?r.stopped.length:null,scope,action:'reception'},
     {indicator:'تعمیرات انجام‌شده',value:r?.known?k.repair+k.both:null,scope,action:'reception'},
@@ -4170,17 +4245,17 @@ function renderManagementOverview() {
   host.innerHTML=`<div class="management-heading"><div><h2>کنترل نمایندگی</h2><p class="muted-note">پذیرش، توقف خودرو و اقدام‌های مربوط به قطعه — از آخرین گزارش‌های ذخیره‌شده</p></div><button type="button" class="btn btn-ghost" data-management-data>مدیریت داده‌ها و اتصال B2B</button></div>
     <div class="management-day no-print"><label for="managementDay">روز تحلیل پذیرش</label><input id="managementDay" inputmode="numeric" value="${esc(day)}"><button class="btn btn-ghost btn-sm" id="managementToday" type="button">امروز</button>${latest&&latest!==day?'<button class="btn btn-ghost btn-sm" id="managementLatest" type="button">آخرین روز موجود: '+esc(latest)+'</button>':''}</div>
     <p class="muted-note">${r?'آمار پذیرش برای '+esc(day)+' است. آخرین تاریخ پذیرش موجود در فایل: '+esc(latest||'نامشخص')+'. خودروهای خارج از بازهٔ فایل در شمارش توقف نیستند.':'دادهٔ پذیرش هنوز موجود نیست؛ شاخص‌های آن تا دریافت فایل نامشخص می‌مانند.'}</p>
-    ${S.t&&!m.covered?'<p class="muted-note">روز انتخابی خارج از پوشش گزارش '+esc(S.t.meta.fromDate)+' تا '+esc(S.t.meta.toDate)+' است؛ شاخص روز نامشخص می‌ماند. دریافت تازه یا آخرین روز موجود را انتخاب کنید.</p>':''}
+    ${S.t&&!m.covered?'<p class="muted-note">روز انتخابی خارج از محدودهٔ دریافت‌شده ('+esc(receptionCoverageLabel(S.t.meta))+') است؛ شاخص روز نامشخص می‌ماند. دریافت تازه یا آخرین روز موجود را انتخاب کنید.</p>':''}
     <div class="grid12 management-kpis">
       ${kpiCard('پذیرش ثبت‌شده در روز',{html:display(r?.daily.length)},foot('کارت یکتا؛ شامل انصرافی‌ها'))}
       ${kpiCard('مانده از روزهای قبل',{html:display(r?.stopped.length)},foot('فاقد ترخیص تا پایان روز؛ در محدودهٔ فایل'))}
-      ${kpiCard('پذیرش تجمعی سال در فایل',{html:display(m.flow?.admissions)},foot('کارت یکتا در محدودهٔ دریافت‌شده تا روز انتخابی'))}
+      ${kpiCard('پذیرش در محدودهٔ دریافت‌شده',{html:display(m.flow?.admissions)},foot('کارت یکتا فقط در روزهای دریافت‌شده تا روز انتخابی؛ آمار کامل سال نیست'))}
       ${kpiCard('ترخیص واقعی در روز',{html:display(m.flow?.releasedToday)},foot('تاریخ ترخیص واقعی؛ بدون انصرافی'))}
       ${kpiCard('اقلام دارای کسری سفارش',{html:display(m.orders?.length)},foot('موجودی در راه در محاسبه لحاظ شده است'))}
       ${kpiCard('ارزش موجودی کندگردش و راکد',{html:m.slowValue===null?'—':esc(fmtRial(m.slowValue))},foot('به قیمت فروش؛ '+display(m.slowMatched)+' از '+display(m.slow?.length)+' قلم تطبیق‌یافته'))}
     </div>
     <div class="grid12 management-charts">
-      <section class="col-12 card"><h3 class="card-title">روند ماهانهٔ پذیرش و ترخیص واقعی</h3><p class="micro">کارت‌های موجود در فایل؛ ماه جاری تا روز انتخابی. ترخیص کارت‌های سال قبل خارج از پوشش گزارش سال جاری است.</p><div id="mgMonthlyFlow">${r?'':missing('پذیرش تا ترخیص')}</div></section>
+      <section class="col-12 card"><h3 class="card-title">روند ماهانهٔ پذیرش و ترخیص واقعی</h3><p class="micro">فقط ماه‌هایی که گزارششان دریافت شده. ماه بدون دریافت نامشخص است، نه صفر. ترخیص کارت‌های بیرون از محدودهٔ دریافت‌شده در این نمودار نیست.</p><div id="mgMonthlyFlow">${r?'':missing('پذیرش تا ترخیص')}</div></section>
       <section class="col-6 card"><div class="management-heading"><h3 class="card-title">روند پذیرش در ۱۴ روز</h3>${link('reception','جدول پذیرش‌ها')}</div><div id="mgReceptionTrend">${r?'':missing('پذیرش تا ترخیص')}</div></section>
       <section class="col-6 card"><div class="management-heading"><h3 class="card-title">عملکرد پذیرشگران در روز انتخاب‌شده</h3>${link('reception','جزئیات هر پذیرشگر')}</div><div id="mgStaff">${r?'':missing('پذیرش تا ترخیص')}</div></section>
       <section class="col-6 card"><div class="management-heading"><h3 class="card-title">خودروهای متوقف؛ اولویت پیگیری بر اساس مدت</h3>${link('reception','لیست خودروهای متوقف')}</div><div id="mgStopped">${r?'':missing('پذیرش تا ترخیص')}</div><p class="micro">توقف بیش از ۱۴ روز: ${display(r?r.age[3].count:null)} خودرو؛ وضعیت توقف نامشخص: ${display(r?.uncertain)}</p></section>
@@ -4215,7 +4290,7 @@ function renderManagementSourceStatus(){
   const host=document.getElementById('managementSourceStatus');if(!host)return;
   host.innerHTML=Object.entries(SOURCE_META).map(([id,def])=>{const s=STATE.sources[id],meta=s?.meta;
     const report=id==='n'?activeNobatReport():null;
-    const range=meta?.fromDate?meta.fromDate+' تا '+meta.toDate:meta?.dateKey||report?.dateKey||'محدودهٔ فایل دستی';
+    const range=id==='t'&&meta?.origin==='b2b'?receptionCoverageLabel(meta):(meta?.fromDate?meta.fromDate+' تا '+meta.toDate:meta?.dateKey||report?.dateKey||'محدودهٔ فایل دستی');
     return '<span class="management-source '+(s?'loaded':'')+'">'+esc(def.label)+' · '+(s?fmtInt(s.records.length)+' ردیف · '+esc(range)+(meta?.receivedAt?' · دریافت '+esc(fmtJalaliDateTime(meta.receivedAt)):''):'داده موجود نیست')+'</span>';
   }).join('');
 }

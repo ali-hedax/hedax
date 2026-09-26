@@ -27,14 +27,26 @@ test('service counts require completed evidence; requested text remains explicit
 });
 test('Tehran 10 AM gate, monthly refresh and fiscal year rollover match server scope',()=>{
  const a=app(),before=new Date('2026-09-21T06:29:00Z'),at=new Date('2026-09-21T06:30:00Z');
- for(const id of ['alef','b','p','t']){const scope=a.ops.operationsScope(id,now);assert.equal(JSON.stringify(validateOperation(scope,now)),JSON.stringify(scope));}
+ // Reception describes a seven-day window; the companion is asked for its parts,
+ // so that one carries the part flag. The others are asked exactly as scoped.
+ for(const id of ['alef','b','p','t']){
+  const scope=a.ops.operationsScope(id,now),asked=id==='t'?{...scope,part:true}:scope;
+  assert.equal(JSON.stringify(validateOperation(asked,now)),JSON.stringify(asked));
+ }
  assert.equal(a.ops.operationDue('p',null,before,true).due,false);assert.equal(a.ops.operationDue('p',null,at).due,true);
  assert.throws(()=>validateOperation(a.ops.operationsScope('p',before),before),{code:'REPORT_NOT_READY'});
  const source={meta:{origin:'b2b',receivedAt:now.valueOf()}};
  assert.equal(a.ops.operationDue('p',source,now).due,false);assert.equal(a.ops.operationDue('b',source,now).due,false);
  assert.equal(a.ops.operationDue('t',source,now).due,false);assert.equal(a.ops.operationDue('t',source,new Date(now.valueOf()+7*86400000)).due,true);assert.equal(a.ops.operationDue('p',source,new Date('2026-09-23T07:00:00Z')).due,true);
  assert.equal(a.ops.operationDue('b',{meta:{origin:'manual',receivedAt:now.valueOf()}},now).due,true);
- const newYear=a.ops.operationsScope('t',new Date('2027-03-22T07:00:00Z'));assert.equal(newYear.fromDate,'1406/01/01');
+ // Just after Nowruz the reception window reaches back into the previous year
+ // instead of collapsing to the first day of the new one.
+ const newYear=a.ops.operationsScope('t',new Date('2027-03-22T07:00:00Z'));
+ assert.equal(newYear.toDate.startsWith('1406/01/'),true,newYear.toDate);
+ assert.equal(newYear.fromDate.startsWith('1405/12/'),true,newYear.fromDate);
+ assert.equal(a.ops.receptionDate(newYear.toDate).jdn-a.ops.receptionDate(newYear.fromDate).jdn,6);
+ // امداد still starts the year afresh
+ assert.equal(a.ops.operationsScope('p',new Date('2027-03-22T07:00:00Z')).fromDate,'1406/01/01');
  for(const bad of [{sourceId:'evil'},{...a.ops.operationsScope('alef',now),warehouse:'روغن'},{...a.ops.operationsScope('t',now),url:'https://other.example'}])assert.throws(()=>validateOperation(bad,now),{code:'INVALID_SCOPE'});
 });
 test('xlsx and HTML inventory exports accepted; login and other responses rejected',()=>{
@@ -56,7 +68,9 @@ test('Excel 2003 XML (SpreadsheetML) is accepted on its own signature',()=>{
 });
 test('new report route uses the same origin/token protections and shared browser lock',async t=>{
  const {createServer}=require('../companion/server.cjs'),{B2BClient}=require('../companion/b2b.cjs');
- const scope=app().ops.operationsScope('t'),client=new B2BClient();client.busy=true;
+ // The companion is asked for a part of the reception window, so the scope sent
+ // over the wire carries the part flag.
+ const scope={...app().ops.operationsScope('t'),part:true},client=new B2BClient();client.busy=true;
  await assert.rejects(client.report(scope),{code:'BUSY'});
  let calls=0;const server=createServer({port:5197,client:{report:async s=>{calls++;return {scope:s};}}});
  await new Promise(r=>server.listen(5197,'127.0.0.1',r));t.after(()=>new Promise(r=>server.close(r)));

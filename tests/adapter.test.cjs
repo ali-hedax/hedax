@@ -99,14 +99,16 @@ async function fixture(t,id,options={}){
     waitForEvent(event){assert.equal(event,'download');downloadPending=true;log.push('download:listen');return Promise.resolve(download);}
   };
   const client={busy:false,open:async()=>page,close:async()=>{}};
-  const scope=id==='alef'?{sourceId:id,dateKey:'1405/07/01',warehouse:adapter.WAREHOUSE}:id==='b'?{sourceId:id,dateKey:'1405/07/01',year:'1405'}:{sourceId:id,fromDate:'1405/01/01',toDate:'1405/07/01'};
+  const scope=id==='alef'?{sourceId:id,dateKey:'1405/07/01',warehouse:adapter.WAREHOUSE}:id==='b'?{sourceId:id,dateKey:'1405/07/01',year:'1405'}:id==='p'?{sourceId:id,fromDate:'1405/01/01',toDate:'1405/07/01'}:{sourceId:id,fromDate:'1405/06/26',toDate:'1405/07/01',part:true};
   const select=async(p,name,value)=>{assert.equal(p,page);assert.equal(name,'انبار');assert.equal(value,adapter.WAREHOUSE);values.set(name,value);log.push('select:'+name);};
   return {adapter,client,scope,log,values,filename,bytes,wasDeleted:()=>deleted,run:()=>adapter.runOperation(client,scope,select)};
 }
 
-for(const id of ['p','t'])test(id+' report fetches the full fiscal year through today and cleans up the downloaded file',async t=>{
+// امداد runs from the start of the year; پذیرش covers the last seven days.
+for(const id of ['p','t'])test(id+' report applies its own date range and cleans up the downloaded file',async t=>{
   const f=await fixture(t,id),result=await f.run();
-  assert.equal(f.values.get('از تاریخ پذیرش'),'1405/01/01');
+  assert.equal(f.values.get('از تاریخ پذیرش'),f.scope.fromDate);
+  assert.equal(f.scope.fromDate,id==='p'?'1405/01/01':'1405/06/26');
   assert.equal(f.values.get('تا تاریخ پذیرش'),'1405/07/01');
   assert.ok(f.log.includes('blur:از تاریخ پذیرش'));
   assert.ok(f.log.includes('blur:تا تاریخ پذیرش'));

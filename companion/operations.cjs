@@ -9,14 +9,30 @@ function today(now=new Date()) {
   const get=k=>parts.find(p=>p.type===k).value;
   return {date:get('year')+'/'+get('month')+'/'+get('day'),year:get('year'),hour:+get('hour')};
 }
+// How far back a reception window may start. Generous enough for an older week
+// the user picks by hand, bounded so a nonsense range is still refused.
+const RECEPTION_MAX_BACK_DAYS=400;
+// Tehran days, newest first: recentDays[0] is today. Walking real days rather
+// than doing Jalali arithmetic keeps month and year boundaries — including
+// Nowruz — correct without a calendar library in the companion.
+function recentDays(now,count) {
+  const out=[];
+  for(let i=0;i<count;i++)out.push(today(new Date(now.valueOf()-i*86400000)).date);
+  return out;
+}
 function validateOperation(input,now=new Date()) {
   const t=today(now),id=input&&input.sourceId;
   if(!Object.hasOwn(ROUTES,id))throw fail('INVALID_SCOPE','نوع گزارش معتبر نیست.');
-  if(id==='t'&&input.part===true){
-    const days=[];
-    for(let i=0;i<367;i++){const d=today(new Date(now.valueOf()-i*86400000));if(d.year!==t.year)break;days.push(d.date);}
+  if(id==='t'){
+    // Reception is always requested as a window of at most seven days ending on
+    // or before today. It is deliberately not tied to the start of the year: a
+    // week that crosses Nowruz is a valid week.
+    if(input.part!==true||Object.keys(input).length!==4)throw fail('INVALID_SCOPE','گزارش پذیرش باید به‌صورت بازهٔ حداکثر هفت‌روزه درخواست شود.');
+    const days=recentDays(now,RECEPTION_MAX_BACK_DAYS);
     const first=days.indexOf(input.fromDate),last=days.indexOf(input.toDate);
-    if(Object.keys(input).length!==4||first<0||last<0||first<last||first-last>6)throw fail('INVALID_SCOPE','هر بخش پذیرش باید حداکثر هفت روز و در سال جاری تا امروز باشد.');
+    if(first<0||last<0)throw fail('INVALID_SCOPE','بازهٔ پذیرش باید در '+RECEPTION_MAX_BACK_DAYS+' روز گذشته و حداکثر تا امروز باشد.');
+    if(first<last)throw fail('INVALID_SCOPE','تاریخ شروع بازهٔ پذیرش نباید بعد از تاریخ پایان باشد.');
+    if(first-last>6)throw fail('INVALID_SCOPE','هر بازهٔ پذیرش حداکثر هفت روز است.');
     return {sourceId:'t',fromDate:input.fromDate,toDate:input.toDate,part:true};
   }
   const expected=id==='alef'?{sourceId:id,dateKey:t.date,warehouse:WAREHOUSE}:id==='b'?{sourceId:id,dateKey:t.date,year:t.year}:{sourceId:id,fromDate:t.year+'/01/01',toDate:t.date};
@@ -109,4 +125,4 @@ async function runOperation(client,input,select) {
     throw fail('B2B_UNAVAILABLE','دریافت گزارش در مرحلهٔ «'+phase+'» کامل نشد. صفحهٔ بازشده در پنجرهٔ B2B را بررسی کنید.');
   } finally {client.busy=false;}
 }
-module.exports={ROUTES,WAREHOUSE,today,validateOperation,fileKind,runOperation,receive};
+module.exports={ROUTES,WAREHOUSE,today,validateOperation,fileKind,runOperation,receive,recentDays,RECEPTION_MAX_BACK_DAYS};
