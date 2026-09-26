@@ -1026,6 +1026,139 @@ function classifyTurnover(raw) {
 }
 const TURNOVER_LEVELS = ["تند گردش", "متوسط گردش", "کند گردش", "راکد"];
 
+/* ---------- خواندن Excel 2003 XML (SpreadsheetML) ----------
+   خروجی «تعمیرات خودرو» در B2B با پسوند .xls می‌آید ولی در واقع این قالب است،
+   نه XLSX و نه جدول HTML. خروجی این خواننده همان ساختار sheet/grid خوانندهٔ
+   xlsx است تا تشخیص هدر، نگاشت ستون و buildRecords مشترک بمانند. */
+const SSML_NS = "urn:schemas-microsoft-com:office:spreadsheet";
+
+/* انکودینگ را از BOM و سپس از اعلان XML می‌گیرد؛ در نبود هر دو، utf-8 و
+   windows-1256 را با عنوان ستون‌های انتظاری روی کل متن مقایسه می‌کند
+   (هدرهای این قالب بعد از چند هزار بایت استایل می‌آیند). */
+function decodeXmlText(buf, expectedHeaders) {
+  const bytes = new Uint8Array(buf);
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) return { text: new TextDecoder("utf-16le").decode(buf), encoding: "utf-16le" };
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) return { text: new TextDecoder("utf-16be").decode(buf), encoding: "utf-16be" };
+  const ascii = String.fromCharCode.apply(null, Array.from(bytes.subarray(0, 200)));
+  const declared = (ascii.match(/<\?xml[^>]*encoding\s*=\s*["']([\w-]+)["']/i) || [])[1];
+  const tries = [];
+  if (declared) tries.push(declared.toLowerCase());
+  for (const enc of ["utf-8", "windows-1256"]) if (!tries.includes(enc)) tries.push(enc);
+  let bestText = "", bestScore = -1, bestEnc = tries[0];
+  for (const enc of tries) {
+    let text;
+    try { text = new TextDecoder(enc, { fatal: false }).decode(buf); } catch (e) { continue; }
+    let score = 0;
+    const nText = norm(text);
+    for (const h of expectedHeaders) if (nText.includes(norm(h))) score++;
+    if (declared && enc === tries[0] && score > 0) return { text, encoding: enc, score };
+    if (score > bestScore) { bestScore = score; bestText = text; bestEnc = enc; }
+  }
+  return { text: bestText, encoding: bestEnc, score: bestScore };
+}
+
+/* فقط دو بی‌نظمیِ مشاهده‌شده در خروجی واقعی اصلاح می‌شود: فاصله/BOM پیش از
+   اعلان XML، و «&» بدون escape. entity معتبر، متن مشتری، شناسه‌ها و مرز
+   ستون‌ها دست‌نخورده می‌مانند و چیزی دوباره escape نمی‌شود. */
+function repairSpreadsheetMlText(text) {
+  const notes = [];
+  let t = String(text);
+  if (t.charCodeAt(0) === 0xfeff) { t = t.slice(1); notes.push("BOM"); }
+  const decl = t.indexOf("<?xml");
+  if (decl > 0 && !t.slice(0, decl).trim()) { t = t.slice(decl); notes.push("فاصلهٔ پیش از اعلان XML"); }
+  let amp = 0;
+  t = t.replace(/&(?!#[0-9]+;|#x[0-9a-fA-F]+;|[A-Za-z][A-Za-z0-9._-]{0,30};)/g, () => { amp++; return "&amp;"; });
+  if (amp) notes.push(amp + " نویسهٔ «&» بدون escape");
+  return { text: t, notes };
+}
+
+/* ss:Index و ss:Type بسته به خروجی ممکن است با پیشوند یا بدون آن بیایند */
+function ssmlAttr(el, name) {
+  if (!el) return null;
+  if (el.getAttributeNS) {
+    const v = el.getAttributeNS(SSML_NS, name);
+    if (v !== null && v !== undefined) return v;
+  }
+  const p = el.getAttribute("ss:" + name);
+  return p !== null && p !== undefined ? p : el.getAttribute(name);
+}
+function ssmlDirectChildren(parent, localName) {
+  // فقط فرزندان مستقیم: Row داخل Table و Cell داخل Row
+  const all = parent.getElementsByTagName(localName);
+  const out = [];
+  for (let i = 0; i < all.length; i++) if (all[i].parentNode === parent) out.push(all[i]);
+  return out.length ? out : Array.from(all);
+}
+
+/* مقدار سلول. ss:Formula هرگز محاسبه نمی‌شود؛ فقط مقدار ذخیره‌شده خوانده
+   می‌شود. عدد تنها وقتی به number تبدیل می‌شود که دقیقاً رفت‌وبرگشت کند،
+   تا شناسه، صفر ابتدایی و عدد بلند سالم بماند. */
+function ssmlCellValue(cellEl) {
+  const dataEls = cellEl.getElementsByTagName("Data");
+  if (!dataEls || !dataEls.length) return "";
+  const d = dataEls[0];
+  const raw = d.textContent === null || d.textContent === undefined ? "" : d.textContent;
+  const type = ssmlAttr(d, "Type") || "";
+  if (type === "Number") {
+    const s = raw.trim();
+    const n = Number(s);
+    if (s !== "" && isFinite(n) && String(n) === s) return n;
+  }
+  return raw;
+}
+
+function parseSpreadsheetMlNative(rawText) {
+  const rep = repairSpreadsheetMlText(rawText);
+  let doc;
+  try { doc = new DOMParser().parseFromString(rep.text, "application/xml"); }
+  catch (e) { throw new Error("ساختار XML این فایل قابل خواندن نیست: " + e.message); }
+  const perr = doc.getElementsByTagName("parsererror");
+  if (perr && perr.length) {
+    throw new Error("ساختار XML این فایل قابل خواندن نیست (خطای تجزیه): " + norm(perr[0].textContent).slice(0, 160));
+  }
+  const sheetEls = Array.from(doc.getElementsByTagName("Worksheet"));
+  if (!sheetEls.length) throw new Error("در فایل Excel XML هیچ شیتی (Worksheet) پیدا نشد؛ ممکن است فایل گزارش نباشد.");
+
+  const sheets = [];
+  for (const ws of sheetEls) {
+    const name = ssmlAttr(ws, "Name") || "";
+    const tables = ws.getElementsByTagName("Table");
+    const sparse = [];
+    let maxCol = -1, rowCursor = 0;
+    if (tables && tables.length) {
+      for (const rowEl of ssmlDirectChildren(tables[0], "Row")) {
+        const rIdx = parseInt(ssmlAttr(rowEl, "Index") || "", 10);
+        if (isFinite(rIdx) && rIdx > 0) rowCursor = rIdx - 1;
+        const arr = [];
+        let col = 0;
+        for (const cellEl of ssmlDirectChildren(rowEl, "Cell")) {
+          const cIdx = parseInt(ssmlAttr(cellEl, "Index") || "", 10);
+          if (isFinite(cIdx) && cIdx > 0) col = cIdx - 1;
+          arr[col] = ssmlCellValue(cellEl);
+          if (col > maxCol) maxCol = col;
+          const across = parseInt(ssmlAttr(cellEl, "MergeAcross") || "", 10);
+          col += (isFinite(across) && across > 0 ? across : 0) + 1; // ادغام نباید ستون‌ها را جابه‌جا کند
+        }
+        sparse[rowCursor] = arr;
+        rowCursor++;
+      }
+    }
+    const grid = [];
+    for (let i = 0; i < sparse.length; i++) {
+      const src = sparse[i] || [];
+      const out = new Array(maxCol + 1).fill("");
+      for (let j = 0; j <= maxCol; j++) out[j] = src[j] === undefined || src[j] === null ? "" : src[j];
+      grid.push(out);
+    }
+    sheets.push({ name, rows: grid, repairs: rep.notes });
+  }
+  return sheets;
+}
+
+function gridHasAnyValue(grid) {
+  return grid.some((row) => row.some((cell) => norm(cell) !== ""));
+}
+
 /* انتخاب شیت: اول نام‌های مورد انتظار، بعد بیشترین تعداد ردیف. نام فایل نقشی ندارد. */
 function pickSheet(sheets, def) {
   if (!sheets.length) throw new Error("هیچ شیتی در فایل پیدا نشد.");
@@ -1087,10 +1220,21 @@ async function ingestFile(sourceId, file) {
       diag.encoding = dec.encoding;
       grid = parseHtmlTableGrid(dec.text);
       diag.sheetNames = ["(جدول HTML)"];
+    } else if (sniff.kind === "spreadsheetml") {
+      const dec = decodeXmlText(buf, def.fields.map((f) => f.label));
+      diag.encoding = dec.encoding;
+      sheetsAll = parseSpreadsheetMlNative(dec.text);
+      diag.sheetNames = sheetsAll.map((s) => s.name);
+      const best = pickSheet(sheetsAll, def);
+      grid = best.rows;
+      diag.pickedSheet = best.name;
+      if (best.repairs && best.repairs.length) diag.repairs = best.repairs;
+      // فایل خالیِ واقعی باید از «هدر ناسازگار» و از «خطای خواندن» جدا بماند
+      if (!gridHasAnyValue(grid)) throw new Error("این فایل Excel XML هیچ سلول دارای مقداری ندارد (گزارش خالی).");
     } else if (sniff.kind === "ole2") {
       throw new Error("این فایل به‌صورت باینری قدیمی Excel (OLE2) است. پردازش این فرمت در این نسخه پیاده‌سازی نشده — لطفاً فایل را از نرم‌افزار مبدا با فرمت xlsx یا HTML خروجی بگیرید.");
     } else {
-      throw new Error("فرمت فایل شناسایی نشد (نه ZIP/xlsx، نه جدول HTML، نه OLE2). امضای ۴ بایت اول: " + sniff.head4);
+      throw new Error("فرمت فایل شناسایی نشد (نه ZIP/xlsx، نه Excel XML، نه جدول HTML، نه OLE2). امضای ۴ بایت اول: " + sniff.head4);
     }
 
     diag.rawRowCount = grid.length;

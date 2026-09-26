@@ -41,6 +41,19 @@ test('xlsx and HTML inventory exports accepted; login and other responses reject
  assert.equal(fileKind(FX.sampleWorkbook()),'xlsx');assert.equal(fileKind(Buffer.from('<html><table><tr><td>part</td></tr></table></html>')),'xls');
  for(const b of ['<html><form><input type=password></form></html>','bad file'])assert.throws(()=>fileKind(Buffer.from(b)),{code:'INVALID_FILE'});
 });
+// The repair-card export is Excel 2003 XML served as .xls. It used to be accepted
+// only because <Table ...> happened to fall inside the sniffed window, which made
+// acceptance depend on how long the style block was. Now it is matched on its own
+// signature, and a login page that merely contains a table still cannot pass.
+test('Excel 2003 XML (SpreadsheetML) is accepted on its own signature',()=>{
+ const SSML=require('./fixtures-ssml');
+ assert.equal(fileKind(SSML.reception()),'xls');
+ assert.equal(fileKind(SSML.receptionDeclared()),'xls');
+ // same document pushed past the old 8 KB <table> window by a long style block
+ const padded=Buffer.from(SSML.reception().toString('utf8').replace('<Styles>','<Styles>'+'<!--'+'x'.repeat(9000)+'-->'),'utf8');
+ assert.equal(fileKind(padded),'xls');
+ assert.throws(()=>fileKind(Buffer.from('<html><body><table><form><input name=user></form></table></body></html>')),{code:'INVALID_FILE'});
+});
 test('new report route uses the same origin/token protections and shared browser lock',async t=>{
  const {createServer}=require('../companion/server.cjs'),{B2BClient}=require('../companion/b2b.cjs');
  const scope=app().ops.operationsScope('t'),client=new B2BClient();client.busy=true;

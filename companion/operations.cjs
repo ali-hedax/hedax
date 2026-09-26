@@ -27,6 +27,10 @@ function validateOperation(input,now=new Date()) {
 function fileKind(bytes) {
   if(bytes.length>=4&&bytes[0]===0x50&&bytes[1]===0x4b&&bytes[2]===3&&bytes[3]===4)return 'xlsx';
   const head=bytes.subarray(0,8192).toString('utf8');
+  // Excel 2003 XML (SpreadsheetML). B2B serves the repair-card report as .xls, but it is
+  // this format, not OLE2 and not an HTML table. Checked before the HTML branch, whose
+  // <table> test would otherwise match <Table ...> by accident and depend on byte offset.
+  if(/urn:schemas-microsoft-com:office:spreadsheet/i.test(head)||/mso-application\s+progid="Excel\.Sheet"/i.test(head))return 'xls';
   if(/<(?:!doctype\s+html|html|table)\b/i.test(head)&&!/<(?:input|form)\b/i.test(head))return 'xls';
   throw fail('INVALID_FILE','پاسخ سامانه فایل گزارش معتبر نیست.');
 }
