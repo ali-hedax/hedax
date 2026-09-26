@@ -1,6 +1,8 @@
 'use strict';
 const path = require('node:path');
 const fs = require('node:fs/promises');
+const archive = require('./archive.cjs');
+const {captureExport} = require('./export.cjs');
 const REPORT_URL = 'https://b2b.isaco.ir/PlanningReport';
 const STATUS = ['همه', 'در صف نوبت', 'در صف پذیرش', 'در صف تقسیم کار', 'در صف سالن', 'در حال تعمیر', 'در صف تغییر جایگاه'];
 const HALLS = ['سالن تعمیرات', 'فضای گازسوز', 'سرویس سریع'];
@@ -28,8 +30,9 @@ async function selectReportValue(page, name, value) {
   if ((await field.inputValue()).trim() !== value.trim()) throw failure('FILTER_MISMATCH', 'فیلتر انتخاب‌شده تأیید نشد.');
 }
 class B2BClient {
-  constructor({profileDir, chromium, channel='chrome'} = {}) {
+  constructor({profileDir, chromium, channel='chrome', root} = {}) {
     this.profileDir = profileDir; this.chromium = chromium; this.channel = channel;
+    this.root = root || path.resolve(__dirname, '..');
     this.context = null; this.page = null; this.launching = null; this.busy = false;
   }
   async open() {
@@ -110,20 +113,25 @@ class B2BClient {
       await selectReportValue(page, 'سالن تعمیرات پذیرش', scope.hall);
       const normalizeDigits = s => s.replace(/[۰-۹]/g, c => '۰۱۲۳۴۵۶۷۸۹'.indexOf(c)).replace(/[٠-٩]/g, c => '٠١٢٣٤٥٦٧٨٩'.indexOf(c));
       if (normalizeDigits(await date.inputValue()) !== scope.dateKey) throw failure('FILTER_MISMATCH', 'تاریخ گزارش تأیید نشد.');
-      // Download listener is registered before the Excel click; keep report bytes out of logs.
+      // The address and session are captured before the click, so a window that
+      // closes mid-transfer no longer loses the report.
       phase = 'دریافت اکسل نوبت‌دهی';
-      const downloadPromise = page.waitForEvent('download', {timeout:90000});
-      downloadPromise.catch(() => {});
-      await page.getByRole('button', {name:'خروجی Excel', exact:true}).click();
-      const download = await downloadPromise;
+      const stages = {download:'pending', read:'pending', format:'pending', archive:'skipped'};
+      const {download, bytes, via, suggested, cookieCount} = await captureExport({
+        context: page.context(), page, timeout: 90000, fail: failure, readFile: f => fs.readFile(f), session: this,
+        click: () => page.getByRole('button', {name:'خروجی Excel', exact:true}).click(),
+      });
       try {
-        if (await download.failure()) throw failure('DOWNLOAD_FAILED', 'دریافت فایل گزارش کامل نشد.');
-        const filePath = await download.path();
-        const stat = await fs.stat(filePath);
-        if (stat.size > 25 * 1024 * 1024) throw failure('INVALID_FILE', 'حجم گزارش بیش از حد مجاز است.');
-        const bytes = await fs.readFile(filePath);
-        if (bytes.length < 4 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) throw failure('INVALID_FILE', 'پاسخ B2B فایل xlsx معتبر نیست.');
-        return {scope, receivedAt:Date.now(), fileName:'b2b-nobat-' + scope.dateKey.replaceAll('/','-') + '.xlsx', base64:bytes.toString('base64')};
+        stages.download = via === 'session' ? 'recovered-from-session' : 'ok';
+        if (bytes.length > 25 * 1024 * 1024) throw failure('INVALID_FILE', 'حجم گزارش بیش از حد مجاز است.');
+        stages.read = 'ok';
+        const format = archive.detectFormat(bytes);
+        stages.format = format;
+        if (format !== 'zip') throw failure('INVALID_FILE', 'پاسخ B2B فایل xlsx معتبر نیست (قالب دریافتی: ' + format + ').');
+        const kept = await archive.keep({root:this.root, download: via === 'download' ? download : null, sourceId:'n', scope, bytes});
+        stages.archive = kept.saved ? 'ok' : kept.reason;
+        return {scope, receivedAt:Date.now(), fileName:'b2b-nobat-' + scope.dateKey.replaceAll('/','-') + '.xlsx', base64:bytes.toString('base64'),
+          diagnostics:{bytes:bytes.length, format, via, sessionCookies:cookieCount, suggestedFilename:archive.safePart(suggested, ''), archived:kept.saved ? kept.name : null, stages}};
       } finally { await download.delete().catch(() => {}); }
     } catch (err) {
       if (err.code) throw err;

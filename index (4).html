@@ -328,6 +328,10 @@ button, select, input { font-family: inherit; }
 .rev-list { list-style: none; margin: 0; padding: 0; }
 .rev-list li { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
 .rev-list li:last-child { border-bottom: 0; }
+.ops-archive { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.ops-archive .card-title { margin: 0 0 4px; font-size: 13px; }
+.ops-archive .rev-list li { gap: 10px; }
+.ops-archive-list { margin: 8px 0; }
 .rev-list .rev-file { color: var(--muted); word-break: break-all; }
 .ops-quick{margin:12px 0 18px}.ops-quick button{min-height:44px}.ops-quick p{margin:7px 0}.ops-panel{margin:16px 0}.ops-source{padding:10px 0;border-bottom:1px solid var(--border)}.ops-controls{display:flex;flex-wrap:wrap;align-items:center;gap:12px}.ops-controls input:not([type=checkbox]),.ops-controls select,.ops-controls button{min-height:44px}.ops-controls strong{margin-inline-end:auto}.ops-panel .muted-note{margin:8px 0}.ops-panel button{min-height:40px}
 .management-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.management-heading h2{margin:0;font-size:22px}.management-heading .card-title{margin:0}.management-day{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0}.management-day input{min-height:44px;max-width:150px;background:var(--surface-2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px;font:inherit}.management-kpis,.management-charts,.management-summary{margin-bottom:18px}.management-charts{margin-top:18px}.management-charts .management-heading{margin-bottom:16px}.management-data{margin-top:20px}.management-sources{display:grid;gap:8px;margin:14px 0}.management-source{padding:10px;border-inline-start:3px solid var(--warn);font-size:12px}.management-source.loaded{border-color:var(--teal)}details>summary{cursor:pointer;min-height:44px;font-weight:700;line-height:1.8}details>summary:focus-visible{outline:2px solid var(--teal);outline-offset:4px}.management-heading button,.management-day button{min-height:44px}
@@ -3736,6 +3740,66 @@ function nobatDue(scope,now=new Date()){
   }
   return {due:true};
 }
+/* Stage-by-stage record of one fetch, and access to the base file the companion
+   kept. Both exist so a failure names the step that broke instead of leaving the
+   user to hunt a UUID-named temporary in Chrome's download history.
+
+   A download that shows as "Removed" in Chrome is normal: the companion reads the
+   bytes and deletes the temporary copy straight away. */
+const B2BStages=(()=>{
+  const LABELS={download:'دانلود از B2B',read:'خواندن بایت‌ها',format:'تشخیص قالب',archive:'نگهداری نسخهٔ مبنا',
+    transfer:'انتقال به هداکس',parse:'پردازش فایل',store:'ذخیره در IndexedDB',render:'به‌روزرسانی نمودارها'};
+  const last=new Map();
+  function begin(id){const rec={id,steps:[],startedAt:Date.now()};last.set(id,rec);return rec;}
+  function step(rec,name,outcome,detail){
+    if(!rec)return;
+    rec.steps.push({name,label:LABELS[name]||name,outcome,detail:detail===undefined?null:detail,at:Date.now()});
+  }
+  /* Folds the companion's own per-step result into the same record. */
+  function fromCompanion(rec,diagnostics){
+    if(!rec||!diagnostics)return;
+    const s=diagnostics.stages||{};
+    for(const name of ['download','read','format','archive'])if(s[name]!==undefined)step(rec,name,s[name]==='ok'||s[name]===diagnostics.format?'ok':s[name],s[name]);
+    rec.bytes=diagnostics.bytes;rec.format=diagnostics.format;rec.archived=diagnostics.archived;
+    rec.suggestedFilename=diagnostics.suggestedFilename||null;
+  }
+  function fail(rec,name,error){step(rec,name,'failed',error&&error.message?error.message:String(error));}
+  function get(id){return last.get(id)||null;}
+  /* A compact one-line summary for the status area — counts and stage names only. */
+  function summary(id){
+    const rec=get(id);if(!rec)return '';
+    const parts=rec.steps.map(s=>s.label+': '+(s.outcome==='ok'?'✓':s.outcome));
+    if(Number.isFinite(rec.bytes))parts.unshift(fmtInt(rec.bytes)+' بایت'+(rec.format?' · '+rec.format:''));
+    return parts.join(' · ');
+  }
+  return {begin,step,fail,fromCompanion,get,summary,LABELS};
+})();
+/* The copies the companion kept, offered for download from inside HEDAX. */
+const B2BArchive=(()=>{
+  async function list(){const r=await B2BRequests.request('archive',{});return r&&r.files?r:{files:[],keepPerSource:0};}
+  async function download(name){
+    const file=await B2BRequests.request('archive',{name});
+    const bytes=Uint8Array.from(atob(file.base64),c=>c.charCodeAt(0));
+    triggerBlobDownload(new Blob([bytes],{type:'application/octet-stream'}),file.name);
+    return file;
+  }
+  function render(host){
+    if(!host)return;
+    host.innerHTML='<p class="micro">در حال خواندن فهرست فایل‌های مبنا…</p>';
+    list().then(({files,keepPerSource})=>{
+      if(!files.length){host.innerHTML='<p class="micro">هنوز فایلی از B2B دریافت نشده است. پس از اولین دریافت، نسخهٔ مبنای همان گزارش اینجا قابل دانلود می‌شود.</p>';return;}
+      host.innerHTML='<p class="micro">نسخهٔ مبنای گزارش‌های دریافت‌شده؛ برای هر منبع حداکثر '+fmtInt(keepPerSource)+' فایل نگهداری می‌شود و قدیمی‌ترها خودکار حذف می‌شوند. این فایل‌ها فقط روی همین رایانه و بیرون از Git می‌مانند.</p>'
+        +'<ul class="rev-list">'+files.map(f=>'<li><button type="button" class="btn btn-ghost btn-sm" data-archive="'+esc(f.name)+'">دانلود</button><span class="rev-file">'+esc(f.name)+'</span><span class="micro">'+fmtInt(f.size)+' بایت · '+esc(fmtJalaliDateTime(f.savedAt))+'</span></li>').join('')+'</ul>';
+      host.querySelectorAll('[data-archive]').forEach(btn=>btn.addEventListener('click',async()=>{
+        btn.disabled=true;const old=btn.textContent;btn.textContent='در حال آماده‌سازی…';
+        try{await download(btn.dataset.archive);btn.textContent='دانلود شد';}
+        catch(e){btn.textContent='ناموفق';toast(e.message,'danger');}
+        finally{setTimeout(()=>{btn.disabled=false;btn.textContent=old;},1500);}
+      }));
+    }).catch(e=>{host.innerHTML='<p class="micro">فهرست فایل‌های مبنا در دسترس نیست: '+esc(e.message)+'</p>';});
+  }
+  return {list,download,render};
+})();
 const B2BSync = (() => {
   let busy = false, token = null, configured = false;
   const $ = id => document.getElementById(id);
@@ -3774,16 +3838,23 @@ const B2BSync = (() => {
       const due=nobatDue(scope);
       if(!force&&!due.due){message(due.reason);return;}
       const result=await B2BGate.guard(async()=>{
+        const rec=B2BStages.begin('n');
         message('در حال دریافت گزارش ' + parsed.key + ' از B2B… آخرین گزارش تا پایان دریافت باقی می‌ماند.');
-        const payload=await request('sync',scope);
+        let payload;
+        try{payload=await request('sync',scope);}catch(e){B2BStages.fail(rec,'download',e);throw e;}
+        B2BStages.fromCompanion(rec,payload.diagnostics);
+        B2BStages.step(rec,'transfer','ok');
         message('در حال پردازش و ذخیرهٔ گزارش نوبت‌دهی…');
-        const outcome=await importB2BReport(payload,scope);
-        return {outcome,receivedAt:payload.receivedAt};
+        // importB2BReport resolves only after NobatStore.put settles.
+        try{const outcome=await importB2BReport(payload,scope);B2BStages.step(rec,'parse','ok');B2BStages.step(rec,'store','ok');return {outcome,receivedAt:payload.receivedAt};}
+        catch(e){B2BStages.fail(rec,/ذخیره|IndexedDB/.test(e.message)?'store':'parse',e);throw e;}
       },text=>message(text));
+      B2BStages.step(B2BStages.get('n'),'render','ok');
       message((result.outcome.duplicate ? 'بررسی شد؛ همین گزارش قبلاً ثبت شده بود.' : 'ذخیره شد؛ گزارش جدید دریافت و ثبت شد.') + ' آخرین دریافت: ' + fmtJalaliDateTime(result.receivedAt));
       try { localStorage.setItem('hedax-b2b-last-success',String(result.receivedAt)); } catch {}
     } catch(e) {
-      message((e.name==='TimeoutError' ? 'زمان دریافت طولانی شد؛ وضعیت B2B را بررسی و دوباره تلاش کنید.' : e.message) + ' آخرین گزارش معتبر حفظ شده است.',true);
+      const rec=B2BStages.get('n'),broken=rec&&rec.steps.find(x=>x.outcome==='failed');
+      message((e.name==='TimeoutError' ? 'زمان دریافت طولانی شد؛ وضعیت B2B را بررسی و دوباره تلاش کنید.' : e.message) + (broken?' مرحلهٔ ناموفق: '+broken.label+'.':'') + ' آخرین گزارش معتبر حفظ شده است.' + (rec&&rec.archived?' نسخهٔ مبنای همین فایل در بخش «فایل‌های مبنا» قابل دانلود است.':''),true);
     } finally { if ($('b2bSyncPanel')) setBusy(false); }
   }
   async function login() {
@@ -3919,12 +3990,15 @@ function receptionPartitions(fromDate,toDate){
   for(let n=from.jdn;n<=to.jdn;n+=7)parts.push({sourceId:'t',fromDate:key(n),toDate:key(Math.min(n+6,to.jdn)),part:true});
   return parts;
 }
-async function fetchReceptionYear(request,scope,progress=()=>{}){
+async function fetchReceptionYear(request,scope,progress=()=>{},rec=null){
   const ranges=receptionPartitions(scope.fromDate,scope.toDate),accepted=[],seen=new Set();
   let receivedAt=0;
   async function read(part){
     progress('دریافت پذیرش '+part.fromDate+' تا '+part.toDate+'؛ '+accepted.length+' بخش کامل شده. اطلاعات قبلی تا پایان حفظ می‌شود.');
-    const payload=await request('report',part),parsed=await parseOperationPayload(payload,part),rows=parsed.res.records;
+    const payload=await request('report',part);
+    B2BStages.fromCompanion(rec,payload.diagnostics);
+    B2BStages.step(rec,'transfer','ok',part.fromDate+'..'+part.toDate);
+    const parsed=await parseOperationPayload(payload,part),rows=parsed.res.records;
     if(rows.length+(parsed.res.diag.rejectedRowCount||0)>=1000){
       const from=receptionDate(part.fromDate).jdn,to=receptionDate(part.toDate).jdn;
       if(from===to)throw Error('حتی گزارش یک روز به سقف ۱۰۰۰ مورد رسیده؛ اطلاعات کامل نیست و جایگزین نشد.');
@@ -3940,7 +4014,11 @@ async function fetchReceptionYear(request,scope,progress=()=>{}){
   const records=accepted.flatMap(x=>x.res.records),hash=await hashBytes(new TextEncoder().encode(accepted.map(x=>x.hash).join('|')).buffer),previous=STATE.sources.t;
   const diag={...accepted[0]?.res.diag,fileName:'پذیرش سال جاری — '+accepted.length+' بخش',fileSize:accepted.reduce((n,x)=>n+x.file.size,0),rawRowCount:accepted.reduce((n,x)=>n+x.res.diag.rawRowCount,0),validRowCount:records.length,rejectedRowCount:accepted.reduce((n,x)=>n+(x.res.diag.rejectedRowCount||0),0),grid:null,parts:accepted.map(x=>({scope:x.scope,diag:x.res.diag})),partCount:accepted.length};
   const snapshot={sourceId:'t',records,diag,meta:{...scope,receivedAt,origin:'b2b',contentHash:hash,fileName:'پذیرش-سال-جاری',partitioned:true,parts:accepted.map(x=>({fromDate:x.scope.fromDate,toDate:x.scope.toDate,rows:x.res.records.length,hash:x.hash}))}};
-  await SourceSnapshots.put(snapshot);STATE.sources.t=snapshot;renderOperationSnapshot('t');recomputeDerived();renderFileDots();renderActiveTab();
+  B2BStages.step(rec,'parse','ok',accepted.length+' بخش');
+  // The whole year replaces the stored snapshot only after every part parsed.
+  await SourceSnapshots.put(snapshot);
+  B2BStages.step(rec,'store','ok');
+  STATE.sources.t=snapshot;renderOperationSnapshot('t');recomputeDerived();renderFileDots();renderActiveTab();
   return {duplicate:previous?.meta?.contentHash===hash,count:records.length,excluded:diag.rejectedRowCount};
 }
 function renderOperationSnapshot(id) {
@@ -3968,22 +4046,35 @@ const OperationsSync=(()=>{
       // The gate waits for a hand-typed sign-in and then retries this same job.
       // Sources that already succeeded are not re-run: only the failed job returns.
       const result=await B2BGate.guard(async()=>{
+        const rec=B2BStages.begin(id);
         show(id,'در حال دریافت '+names[id]+'… گزارش قبلی تا پایان دریافت حفظ می‌شود.');
-        if(id==='t')return fetchReceptionYear(request,scope,msg=>show(id,msg));
-        const payload=await request('report',scope);
+        if(id==='t')return fetchReceptionYear(request,scope,msg=>show(id,msg),rec);
+        let payload;
+        try{payload=await request('report',scope);}catch(e){B2BStages.fail(rec,'download',e);throw e;}
+        B2BStages.fromCompanion(rec,payload.diagnostics);
+        B2BStages.step(rec,'transfer','ok');
         show(id,'در حال پردازش و ذخیرهٔ '+names[id]+'…');
-        return importOperationReport(payload,scope);
+        // importOperationReport only resolves once IndexedDB has accepted the snapshot,
+        // so nothing below here can report success for data that was not stored.
+        try{const out=await importOperationReport(payload,scope);B2BStages.step(rec,'parse','ok');B2BStages.step(rec,'store','ok');return out;}
+        catch(e){B2BStages.fail(rec,/ذخیره|IndexedDB/.test(e.message)?'store':'parse',e);throw e;}
       },text=>show(id,'منتظر ورود — '+text));
+      B2BStages.step(B2BStages.get(id),'render','ok');
       const payload={receivedAt:STATE.sources[id].meta.receivedAt};
       show(id,(result.duplicate?'محتوا تغییری نداشت. ':'ذخیره شد. ')+fmtInt(result.count)+' ردیف · '+fmtJalaliDateTime(payload.receivedAt)+(result.excluded?' · '+fmtInt(result.excluded)+' ردیف ناقص یا جمع در آمار نیست؛ جزئیات ورودی را بررسی کنید.':''));
-    }).catch(e=>show(id,(e.name==='TimeoutError'?'زمان دریافت طولانی شد؛ دوباره تلاش کنید.':e.message)+' آخرین دادهٔ معتبر حفظ شده است.')).finally(()=>{pending.delete(id);busy(id,false);});
+    }).catch(e=>{
+      const rec=B2BStages.get(id),broken=rec&&rec.steps.find(x=>x.outcome==='failed');
+      const where=broken?' مرحلهٔ ناموفق: '+broken.label+'.':'';
+      show(id,(e.name==='TimeoutError'?'زمان دریافت طولانی شد؛ دوباره تلاش کنید.':e.message)+where+' آخرین دادهٔ معتبر حفظ شده است.'+(rec&&rec.archived?' نسخهٔ مبنای همین فایل در بخش «فایل‌های مبنا» قابل دانلود است.':''));
+    }).finally(()=>{pending.delete(id);busy(id,false);});
     return queue;
   }
   function mount(){
     Object.entries(tabs).forEach(([tab,ids])=>{
       const parent=document.getElementById('tab-'+tab);if(!parent||parent.querySelector('.ops-panel'))return;
       const panel=document.createElement('details');panel.className='card ops-panel no-print';panel.setAttribute('aria-label','دریافت گزارش‌های B2B');
-      panel.innerHTML='<summary>به‌روزرسانی داده‌های مبنای تحلیل از B2B</summary>'+ids.map(id=>'<div class="ops-source" data-ops-source="'+id+'"><div class="ops-controls"><strong>'+names[id]+'</strong><label><input type="checkbox" data-ops-auto="'+id+'" '+(enabled[id]?'checked':'')+'> خودکار</label><button type="button" class="btn btn-ghost btn-sm" data-ops-refresh="'+id+'">به‌روزرسانی اکنون</button></div><p class="muted-note" role="status" aria-live="polite" data-ops-status="'+id+'"></p></div>').join('')+'<button type="button" class="btn btn-ghost btn-sm ops-login">ورود به B2B در Chrome</button>';
+      panel.innerHTML='<summary>به‌روزرسانی داده‌های مبنای تحلیل از B2B</summary>'+ids.map(id=>'<div class="ops-source" data-ops-source="'+id+'"><div class="ops-controls"><strong>'+names[id]+'</strong><label><input type="checkbox" data-ops-auto="'+id+'" '+(enabled[id]?'checked':'')+'> خودکار</label><button type="button" class="btn btn-ghost btn-sm" data-ops-refresh="'+id+'">به‌روزرسانی اکنون</button></div><p class="muted-note" role="status" aria-live="polite" data-ops-status="'+id+'"></p></div>').join('')+'<button type="button" class="btn btn-ghost btn-sm ops-login">ورود به B2B در Chrome</button>'
+        +'<div class="ops-archive"><h4 class="card-title">فایل‌های مبنا</h4><p class="micro">فایل موقت Chrome با نام UUID پس از خواندن حذف می‌شود؛ این نسخه‌ها جایگزین آن‌اند.</p><div class="ops-archive-list"></div><button type="button" class="btn btn-ghost btn-sm ops-archive-refresh">به‌روزرسانی فهرست</button></div>';
       if(tab==='dashboard')document.getElementById('managementSyncSlot').appendChild(panel);else parent.appendChild(panel);
       const quick=document.createElement('div');quick.className='card ops-quick no-print';quick.setAttribute('aria-label','اتصال B2B');
       quick.innerHTML='<div class="ops-controls">'+ids.map(id=>'<button class="btn btn-primary" type="button" data-ops-refresh="'+id+'">دریافت '+names[id]+' از B2B</button>').join('')+'<button type="button" class="btn btn-ghost ops-login">ورود به B2B در Chrome</button></div><p class="micro">'+(ids.includes('t')?'پذیرش: به‌روزرسانی هفتگی؛ دریافت از اول سال در بخش‌های کوچک برای کنترل سقف ۱۰۰۰ مورد. ': '')+(ids.includes('p')?'امداد: از اول سال تا امروز، از ساعت ۱۰ صبح. ':'')+(ids.includes('alef')||ids.includes('b')?'موجودی و DPLAN: آخرین وضعیت سال جاری.':'')+'</p>'+ids.map(id=>'<p class="micro" role="status" aria-live="polite"><strong>'+names[id]+': </strong><span data-ops-status="'+id+'"></span></p>').join('');
@@ -3993,6 +4084,9 @@ const OperationsSync=(()=>{
       panel.querySelectorAll('[data-ops-refresh]').forEach(el=>el.addEventListener('click',()=>sync(el.dataset.opsRefresh,true)));
       panel.querySelectorAll('[data-ops-auto]').forEach(el=>el.addEventListener('change',()=>{const id=el.dataset.opsAuto;enabled[id]=el.checked;document.querySelectorAll('[data-ops-auto="'+id+'"]').forEach(x=>x.checked=el.checked);try{localStorage.setItem('hedax-ops-enabled',JSON.stringify(enabled));}catch{};}));
       panel.querySelector('.ops-login').addEventListener('click',()=>signIn(ids));
+      const archiveHost=panel.querySelector('.ops-archive-list');
+      panel.querySelector('.ops-archive-refresh').addEventListener('click',()=>B2BArchive.render(archiveHost));
+      panel.addEventListener('toggle',()=>{if(panel.open)B2BArchive.render(archiveHost);});
     });
     // The upload icons get the same source-specific one-click action.
     Object.keys(names).forEach(id=>{const card=document.getElementById('upcard-'+id);if(!card||card.querySelector('[data-ops-refresh]'))return;const button=document.createElement('button');button.className='btn btn-ghost btn-sm';button.type='button';button.dataset.opsRefresh=id;button.textContent='دریافت از B2B';button.addEventListener('click',()=>sync(id,true));card.appendChild(button);});

@@ -31,6 +31,10 @@ async function fixture(t,id,options={}){
   const download={
     failure:async()=>options.downloadFailure||null,
     path:async()=>filename,
+    // The export is a plain GET, so the address is captured in case the window
+    // closes mid-transfer and the file has to be fetched from the session.
+    url:()=>options.downloadUrl||'https://b2brep.isaco.ir/Report/Show?id=1',
+    suggestedFilename:()=>'res.xlsx',
     delete:async()=>{deleted=true;log.push('download:delete');await fs.unlink(filename);}
   };
   const add=(role,name,value='')=>{
@@ -84,9 +88,17 @@ async function fixture(t,id,options={}){
       assert.ok(pattern.test('1 - 20 از 7009'),'Must wait for the observed DPLAN populated pager');
       return {async waitFor(){assert.ok(completed);log.push('dplan:ready');if(options.pagerFailure)throw new Error('synthetic pager timeout');}};
     },
+    // The export is triggered through a popup, so the adapter waits for the
+    // download on the context rather than on the page that opened it, and reads
+    // the session up front in case that popup takes the window down with it.
+    context(){return {
+      waitForEvent:(event)=>page.waitForEvent(event),
+      cookies:async()=>{log.push('cookies:read');return [{name:'S',value:'session',domain:'.isaco.ir'}];},
+    };},
+    evaluate:async()=>'UA/1.0',
     waitForEvent(event){assert.equal(event,'download');downloadPending=true;log.push('download:listen');return Promise.resolve(download);}
   };
-  const client={busy:false,open:async()=>page};
+  const client={busy:false,open:async()=>page,close:async()=>{}};
   const scope=id==='alef'?{sourceId:id,dateKey:'1405/07/01',warehouse:adapter.WAREHOUSE}:id==='b'?{sourceId:id,dateKey:'1405/07/01',year:'1405'}:{sourceId:id,fromDate:'1405/01/01',toDate:'1405/07/01'};
   const select=async(p,name,value)=>{assert.equal(p,page);assert.equal(name,'انبار');assert.equal(value,adapter.WAREHOUSE);values.set(name,value);log.push('select:'+name);};
   return {adapter,client,scope,log,values,filename,bytes,wasDeleted:()=>deleted,run:()=>adapter.runOperation(client,scope,select)};
