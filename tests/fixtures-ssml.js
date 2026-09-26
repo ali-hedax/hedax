@@ -95,7 +95,15 @@ const T_EXPECTED = {
   columns: T_HEADERS.length,
 };
 
+/* A tiny workbook whose rows all sit inside one requested partition, so the
+   year-splitting reception fetch can be driven end to end. */
+function receptionForRange(fromDate, cards) {
+  const rows = cards.map((card, i) => [card, fromDate, "خودرو آزمایشی", "11الف111-1" + i, "پذیرشگر آزمایشی ۱", "سالن تعمیرات", "در حال تعمیر", "", "", fromDate + " 08:0" + i, "", 100000]);
+  return buildSpreadsheetMl([{ name: "لیست پذیرش ها", columnCount: T_HEADERS.length, rows: [T_HEADERS, ...rows] }], { leadingBlank: true });
+}
+
 module.exports = {
+  receptionForRange,
   buildSpreadsheetMl, receptionSheet, T_HEADERS, T_ROWS, T_EXPECTED,
 
   /* the ordinary case, shaped like the real export */

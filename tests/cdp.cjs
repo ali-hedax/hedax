@@ -87,7 +87,7 @@ async function evaluate(cdp, expression) {
 
 /* Opens the dashboard in headless Chrome. Returns null when no Chrome exists,
    so a machine without one skips instead of failing. */
-async function openDashboard(port) {
+async function openDashboard(port, url) {
   const chrome = findChrome();
   if (!chrome) return null;
   const userDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hedax-cdp-'));
@@ -95,7 +95,7 @@ async function openDashboard(port) {
     '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
     '--allow-file-access-from-files',
     `--remote-debugging-port=${port}`, `--user-data-dir=${userDir}`,
-    fileUrl(APP),
+    url || fileUrl(APP),
   ], { stdio: 'ignore' });
   const target = await waitForTarget(port);
   const cdp = await connect(target.webSocketDebuggerUrl);

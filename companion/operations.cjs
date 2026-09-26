@@ -61,7 +61,7 @@ async function runOperation(client,input,select) {
     const page=await client.open();phase='باز کردن صفحهٔ گزارش';await page.goto('https://b2b.isaco.ir'+ROUTES[id],{waitUntil:'domcontentloaded',timeout:45000});
     const anchor=id==='alef'?page.getByRole('listbox',{name:'انبار',exact:true}):id==='b'?page.getByRole('button',{name:'تکمیل اطلاعات',exact:true}):page.getByRole('textbox',{name:'از تاریخ پذیرش',exact:true});
     try{await anchor.waitFor({state:'visible',timeout:20000});}catch{
-      if(new URL(page.url()).pathname!==ROUTES[id])throw fail('LOGIN_REQUIRED','در پنجره Google Chrome همراه هداکس وارد B2B شوید؛ سپس دکمهٔ دریافت را بزنید.');
+      if(new URL(page.url()).pathname!==ROUTES[id])throw fail('LOGIN_REQUIRED',require('./b2b.cjs').LOGIN_WAIT_MESSAGE);
       throw fail('PAGE_CHANGED','کنترل گزارش در صفحهٔ B2B پیدا نشد؛ صفحه را در پنجرهٔ همراه بررسی کنید.');
     }
     if(new URL(page.url()).pathname!==ROUTES[id])throw fail('PAGE_CHANGED','صفحهٔ گزارش مورد انتظار باز نشد.');

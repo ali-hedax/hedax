@@ -20,7 +20,7 @@ const EXPORTS = [
   "computeNobatStats", "nobatScopeKey", "nobatScopeLabel", "classifyIncomingReport",
   "latestPerScope", "revisionsOfScope", "hashBytes", "NobatStore", "buildNobatReport",
   "NOBAT_EMPTY_STATUS", "NOBAT_STATUS_ALL", "NOBAT_HALL_DEFAULT", "STATE",
-  "computeReceptionStats", "receptionFlow", "receptionCovers", "receptionDate", "receptionPartitions", "renderNobat", "renderReception", "renderDashboard", "activeNobatReport", "setActiveNobatSource", "fmtJalaliDateTime", "loadNobatFromStore", "TAB_RENDERERS", "TAB_TITLES",
+  "B2BGate", "B2BRequests", "nobatDue", "operationDue", "operationsToday", "operationsScope", "OperationsSync", "B2BSync", "computeReceptionStats", "receptionFlow", "receptionCovers", "receptionDate", "receptionPartitions", "renderNobat", "renderReception", "renderDashboard", "activeNobatReport", "setActiveNobatSource", "fmtJalaliDateTime", "loadNobatFromStore", "TAB_RENDERERS", "TAB_TITLES",
 ];
 
 function extractScripts(html) {
@@ -48,6 +48,7 @@ function loadApp() {
     TextDecoder, TextEncoder, DataView, Uint8Array, ArrayBuffer, Blob, Response, File,
     DecompressionStream, CompressionStream, Promise, Math, JSON, Date, Intl,
     crypto: globalThis.crypto,
+    AbortSignal, AbortController, fetch: globalThis.fetch, Response: globalThis.Response, URL, TypeError, SyntaxError,
     DOMParser,
     performance: { now: () => Date.now() },
     requestAnimationFrame: (cb) => setTimeout(() => cb(Date.now()), 0),

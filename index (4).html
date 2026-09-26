@@ -3674,6 +3674,68 @@ const B2BRequests=(()=>{
   }
   return {request:(route,body)=>{const next=tail.catch(()=>{}).then(()=>send(route,body));tail=next;return next;}};
 })();
+/* Coordinates the hands-off flow: HEDAX opens, Chrome opens, the user signs in
+   by hand, and the queued fetches carry on by themselves. There is deliberately
+   no «وارد شدم» button.
+
+   The probe behind `state` is passive on the companion side — it never
+   navigates, reloads or focuses — so polling it cannot disturb a password or a
+   captcha being typed. `ready` from the probe is only a hint to try again; the
+   authoritative check is the fetch itself, which waits for the real report
+   controls and raises LOGIN_REQUIRED when they are not there. */
+const B2BGate=(()=>{
+  const WAIT_TEXT='در پنجرهٔ Chrome وارد B2B شوید؛ دریافت گزارش‌ها پس از ورود خودکار ادامه پیدا می‌کند.';
+  let pending=null,cancelled=false,pollMs=4000,maxWaitMs=30*60*1000;
+  function configure(opts){if(opts&&Number.isFinite(opts.pollMs))pollMs=opts.pollMs;if(opts&&Number.isFinite(opts.maxWaitMs))maxWaitMs=opts.maxWaitMs;}
+  function waiting(){return !!pending;}
+  function cancel(){cancelled=true;}
+  function waitForLogin(){
+    if(pending)return pending;
+    cancelled=false;
+    const started=Date.now();
+    pending=(async()=>{
+      // Brings the existing window forward; B2BClient.open() reuses one window.
+      try{await B2BRequests.request('login',{});}
+      catch(e){if(e.code!=='BUSY')throw e;}
+      for(;;){
+        if(cancelled)throw Object.assign(new Error('انتظار برای ورود متوقف شد.'),{code:'LOGIN_CANCELLED'});
+        if(Date.now()-started>maxWaitMs)throw Object.assign(new Error('انتظار برای ورود به B2B طولانی شد؛ پس از ورود، دکمهٔ دریافت را بزنید.'),{code:'LOGIN_TIMEOUT'});
+        await new Promise(r=>setTimeout(r,pollMs));
+        let s=null;
+        try{s=await B2BRequests.request('state',{});}catch{s=null;} // a hiccup is just "not yet"
+        if(s&&s.ready)return s;
+      }
+    })();
+    pending.catch(()=>{}).then(()=>{pending=null;});
+    return pending;
+  }
+  /* Runs one fetch job. If the session is missing, it waits for the user's login
+     and then retries that same job once. The caller's queue stays held while we
+     wait, so nothing else starts and the order is preserved. A job that already
+     succeeded is never re-run, because only the failed job is retried. */
+  async function guard(job,onWait){
+    try{return await job();}
+    catch(e){
+      if(e.code!=='LOGIN_REQUIRED')throw e;
+      if(onWait)onWait(WAIT_TEXT);
+      await waitForLogin();
+      return job();
+    }
+  }
+  return {guard,waitForLogin,waiting,cancel,configure,WAIT_TEXT};
+})();
+/* A daily snapshot: once today's report for this exact scope is in, do not
+   download it again today. A different date is always due. */
+function nobatDue(scope,now=new Date()){
+  const key=nobatScopeKey(scope);
+  const latest=latestPerScope(STATE.nobat.reports).find(r=>r.scopeKey===key);
+  if(!latest||latest.source!=='b2b'||!Number.isFinite(latest.fetchedAt))return {due:true};
+  const today=operationsToday(now).dateKey;
+  if(scope.dateKey===today&&operationsToday(new Date(latest.fetchedAt)).dateKey===today){
+    return {due:false,reason:'گزارش نوبت‌دهی امروز دریافت شده است؛ دریافت بعدی فردا انجام می‌شود یا با دکمهٔ دریافت.'};
+  }
+  return {due:true};
+}
 const B2BSync = (() => {
   let busy = false, token = null, configured = false;
   const $ = id => document.getElementById(id);
@@ -3699,7 +3761,7 @@ const B2BSync = (() => {
     try { localStorage.setItem('hedax-b2b-settings',JSON.stringify({enabled:$('b2bAuto').checked,today:$('b2bToday').checked,dateKey:$('b2bDate').value,statusFilter:$('b2bStatus').value,hall:$('b2bHall').value})); } catch {}
   }
   const request=(route,body)=>B2BRequests.request(route,body);
-  async function run() {
+  async function run(force=false) {
     if (busy) return;
     let parsed;
     try {
@@ -3708,11 +3770,18 @@ const B2BSync = (() => {
       if (!parsed.valid) throw new Error(parsed.reason);
       save(); setBusy(true);
       const scope={dateKey:parsed.key,statusFilter:$('b2bStatus').value,hall:$('b2bHall').value};
-      message('در حال دریافت گزارش ' + parsed.key + ' از B2B… آخرین گزارش تا پایان دریافت باقی می‌ماند.');
-      const payload=await request('sync',scope);
-      const result=await importB2BReport(payload,scope);
-      message((result.duplicate ? 'بررسی شد؛ همین گزارش قبلاً ثبت شده بود.' : 'گزارش جدید دریافت و ذخیره شد.') + ' آخرین دریافت: ' + fmtJalaliDateTime(payload.receivedAt));
-      try { localStorage.setItem('hedax-b2b-last-success',String(payload.receivedAt)); } catch {}
+      if(STATE.nobat.ready) await STATE.nobat.ready;
+      const due=nobatDue(scope);
+      if(!force&&!due.due){message(due.reason);return;}
+      const result=await B2BGate.guard(async()=>{
+        message('در حال دریافت گزارش ' + parsed.key + ' از B2B… آخرین گزارش تا پایان دریافت باقی می‌ماند.');
+        const payload=await request('sync',scope);
+        message('در حال پردازش و ذخیرهٔ گزارش نوبت‌دهی…');
+        const outcome=await importB2BReport(payload,scope);
+        return {outcome,receivedAt:payload.receivedAt};
+      },text=>message(text));
+      message((result.outcome.duplicate ? 'بررسی شد؛ همین گزارش قبلاً ثبت شده بود.' : 'ذخیره شد؛ گزارش جدید دریافت و ثبت شد.') + ' آخرین دریافت: ' + fmtJalaliDateTime(result.receivedAt));
+      try { localStorage.setItem('hedax-b2b-last-success',String(result.receivedAt)); } catch {}
     } catch(e) {
       message((e.name==='TimeoutError' ? 'زمان دریافت طولانی شد؛ وضعیت B2B را بررسی و دوباره تلاش کنید.' : e.message) + ' آخرین گزارش معتبر حفظ شده است.',true);
     } finally { if ($('b2bSyncPanel')) setBusy(false); }
@@ -3720,9 +3789,17 @@ const B2BSync = (() => {
   async function login() {
     if(busy) return;
     setBusy(true); message('در حال بازکردن پنجرهٔ ورود B2B…');
-    try { message((await request('login',{})).message); }
+    try {
+      message((await request('login',{})).message);
+      // Nothing else to press: once the sign-in is done the queued work resumes.
+      await B2BGate.waitForLogin();
+      message('ورود شناسایی شد؛ ادامهٔ دریافت گزارش‌ها…');
+      setBusy(false);
+      void run();
+      return;
+    }
     catch(e) { message(e.message,true); }
-    finally { setBusy(false); }
+    finally { if($('b2bSyncPanel')) setBusy(false); }
   }
   function init() {
     if(configured || !$('b2bSyncPanel')) return; configured=true;
@@ -3734,8 +3811,8 @@ const B2BSync = (() => {
     for (const [id,key] of [['b2bStatus','statusFilter'],['b2bHall','hall']]) {
       if (Array.from($(id).options).some(x=>x.value===saved[key])) $(id).value=saved[key];
     }
-    $('b2bRefresh').addEventListener('click',run);
-    $('b2bQuickRefresh').addEventListener('click',run);
+    $('b2bRefresh').addEventListener('click',()=>run(true));
+    $('b2bQuickRefresh').addEventListener('click',()=>run(true));
     $('b2bQuickLogin').addEventListener('click',login);
     $('b2bQuickSettings').addEventListener('click',()=>{$('b2bSyncPanel').open=true;$('b2bSyncPanel').scrollIntoView({block:'start'});});
     $('b2bLogin').addEventListener('click',login);
@@ -3747,7 +3824,9 @@ const B2BSync = (() => {
     if(last) message('آخرین دریافت موفق: ' + fmtJalaliDateTime(last));
   }
   function onOpen() { init(); if($('b2bAuto') && $('b2bAuto').checked) void run(); }
-  return {init,onOpen,run};
+  // Called from the shared pass: same cadence rules, without opening the tab.
+  function autoOpen() { init(); if($('b2bAuto') && $('b2bAuto').checked) void run(); }
+  return {init,onOpen,autoOpen,run};
 })();
 async function importB2BReport(payload, expectedScope) {
   if(!payload || !payload.scope || nobatScopeKey(payload.scope)!==nobatScopeKey(expectedScope) || !Number.isFinite(payload.receivedAt)) throw new Error('تاریخ یا محدودهٔ فایل دریافتی با درخواست هم‌خوان نیست.');
@@ -3886,10 +3965,17 @@ const OperationsSync=(()=>{
       const due=operationDue(id,STATE.sources[id],new Date(),force);
       if(!due.due){show(id,due.reason);return;}
       const scope=operationsScope(id);
-      show(id,'در حال دریافت '+names[id]+'… گزارش قبلی تا پایان دریافت حفظ می‌شود.');
-      const result=id==='t'?await fetchReceptionYear(request,scope,msg=>show(id,msg)):await importOperationReport(await request('report',scope),scope);
+      // The gate waits for a hand-typed sign-in and then retries this same job.
+      // Sources that already succeeded are not re-run: only the failed job returns.
+      const result=await B2BGate.guard(async()=>{
+        show(id,'در حال دریافت '+names[id]+'… گزارش قبلی تا پایان دریافت حفظ می‌شود.');
+        if(id==='t')return fetchReceptionYear(request,scope,msg=>show(id,msg));
+        const payload=await request('report',scope);
+        show(id,'در حال پردازش و ذخیرهٔ '+names[id]+'…');
+        return importOperationReport(payload,scope);
+      },text=>show(id,'منتظر ورود — '+text));
       const payload={receivedAt:STATE.sources[id].meta.receivedAt};
-      show(id,(result.duplicate?'محتوا تغییری نداشت. ':'گزارش دریافت و ذخیره شد. ')+fmtInt(result.count)+' ردیف · '+fmtJalaliDateTime(payload.receivedAt)+(result.excluded?' · '+fmtInt(result.excluded)+' ردیف ناقص یا جمع در آمار نیست؛ جزئیات ورودی را بررسی کنید.':''));
+      show(id,(result.duplicate?'محتوا تغییری نداشت. ':'ذخیره شد. ')+fmtInt(result.count)+' ردیف · '+fmtJalaliDateTime(payload.receivedAt)+(result.excluded?' · '+fmtInt(result.excluded)+' ردیف ناقص یا جمع در آمار نیست؛ جزئیات ورودی را بررسی کنید.':''));
     }).catch(e=>show(id,(e.name==='TimeoutError'?'زمان دریافت طولانی شد؛ دوباره تلاش کنید.':e.message)+' آخرین دادهٔ معتبر حفظ شده است.')).finally(()=>{pending.delete(id);busy(id,false);});
     return queue;
   }
@@ -3903,16 +3989,31 @@ const OperationsSync=(()=>{
       quick.innerHTML='<div class="ops-controls">'+ids.map(id=>'<button class="btn btn-primary" type="button" data-ops-refresh="'+id+'">دریافت '+names[id]+' از B2B</button>').join('')+'<button type="button" class="btn btn-ghost ops-login">ورود به B2B در Chrome</button></div><p class="micro">'+(ids.includes('t')?'پذیرش: به‌روزرسانی هفتگی؛ دریافت از اول سال در بخش‌های کوچک برای کنترل سقف ۱۰۰۰ مورد. ': '')+(ids.includes('p')?'امداد: از اول سال تا امروز، از ساعت ۱۰ صبح. ':'')+(ids.includes('alef')||ids.includes('b')?'موجودی و DPLAN: آخرین وضعیت سال جاری.':'')+'</p>'+ids.map(id=>'<p class="micro" role="status" aria-live="polite"><strong>'+names[id]+': </strong><span data-ops-status="'+id+'"></span></p>').join('');
       parent.querySelector('.section-sub').insertAdjacentElement('afterend',quick);
       quick.querySelectorAll('[data-ops-refresh]').forEach(el=>el.addEventListener('click',()=>sync(el.dataset.opsRefresh,true)));
-      quick.querySelector('.ops-login').addEventListener('click',()=>request('login',{}).then(r=>ids.forEach(id=>show(id,r.message))).catch(e=>ids.forEach(id=>show(id,e.message))));
+      quick.querySelector('.ops-login').addEventListener('click',()=>signIn(ids));
       panel.querySelectorAll('[data-ops-refresh]').forEach(el=>el.addEventListener('click',()=>sync(el.dataset.opsRefresh,true)));
       panel.querySelectorAll('[data-ops-auto]').forEach(el=>el.addEventListener('change',()=>{const id=el.dataset.opsAuto;enabled[id]=el.checked;document.querySelectorAll('[data-ops-auto="'+id+'"]').forEach(x=>x.checked=el.checked);try{localStorage.setItem('hedax-ops-enabled',JSON.stringify(enabled));}catch{};}));
-      panel.querySelector('.ops-login').addEventListener('click',()=>request('login',{}).then(r=>ids.forEach(id=>show(id,r.message))).catch(e=>ids.forEach(id=>show(id,e.message))));
+      panel.querySelector('.ops-login').addEventListener('click',()=>signIn(ids));
     });
     // The upload icons get the same source-specific one-click action.
     Object.keys(names).forEach(id=>{const card=document.getElementById('upcard-'+id);if(!card||card.querySelector('[data-ops-refresh]'))return;const button=document.createElement('button');button.className='btn btn-ghost btn-sm';button.type='button';button.dataset.opsRefresh=id;button.textContent='دریافت از B2B';button.addEventListener('click',()=>sync(id,true));card.appendChild(button);});
     Object.keys(names).forEach(id=>{const meta=STATE.sources[id]&&STATE.sources[id].meta;show(id,messages[id]||(meta?'آخرین دریافت: '+fmtJalaliDateTime(meta.receivedAt):['p','b'].includes(id)?'از ابتدای سال؛ به‌روزرسانی خودکار پس از تغییر ماه'+(id==='p'?'، از ساعت ۱۰ صبح':''):'با بازشدن بخش، دریافت می‌شود.'));});
   }
-  function onOpen(tab){if(!initialized)return;for(const id of tabs[tab]||[])if(enabled[id])void sync(id);}
+  /* Brings the Chrome window forward and, once the sign-in is detected, starts
+     the pass by itself. No «وارد شدم» step. */
+  async function signIn(ids){
+    ids.forEach(id=>show(id,'منتظر ورود — '+B2BGate.WAIT_TEXT));
+    try{
+      await B2BGate.waitForLogin();
+      ids.forEach(id=>show(id,'ورود شناسایی شد؛ ادامهٔ دریافت…'));
+      for(const id of ids)if(enabled[id])void sync(id);
+    }catch(e){ids.forEach(id=>show(id,e.message));}
+  }
+  function onOpen(tab){
+    if(!initialized)return;
+    for(const id of tabs[tab]||[])if(enabled[id])void sync(id);
+    // نوبت‌دهی روزانه است و به تب خودش وابسته نیست؛ nobatDue تکرار را می‌گیرد.
+    if(typeof B2BSync!=='undefined')B2BSync.autoOpen();
+  }
   function init(){if(initialized)return;initialized=true;try{Object.assign(enabled,JSON.parse(localStorage.getItem('hedax-ops-enabled')||'{}'));}catch{}
     ready=SourceSnapshots.all().then(rows=>{rows.forEach(s=>{if(!STATE.sources[s.sourceId])STATE.sources[s.sourceId]=s;renderOperationSnapshot(s.sourceId);});recomputeDerived();renderFileDots();renderActiveTab();}).catch(()=>{});
     mount();ready.then(()=>{mount();onOpen(STATE.activeTab);});

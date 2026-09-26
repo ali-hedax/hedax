@@ -28,7 +28,11 @@ test('Chrome login launches a persistent download-enabled context once and locks
   const login=client.login();
   await assert.rejects(client.login(),{code:'BUSY'});
   await assert.rejects(client.sync({dateKey:'1405/07/02',statusFilter:'همه',hall:'سالن تعمیرات'}),{code:'BUSY'});
-  release();assert.match((await login).message,/Google Chrome/);
+  // Points the user at the Chrome window, never at Edge, and promises the
+  // fetch resumes by itself — the exact wording lives in LOGIN_WAIT_MESSAGE.
+  release();const loginMessage=(await login).message;
+  assert.match(loginMessage,/Chrome/);assert.equal(/Edge/.test(loginMessage),false);
+  assert.match(loginMessage,/خودکار ادامه/);
   assert.equal(client.busy,false);assert.equal(await client.open(),page);assert.equal(launchCount,1);assert.equal(front,1);
   assert.deepEqual(urls,['https://b2b.isaco.ir/PlanningReport']);
   await client.close();assert.equal(client.context,null);

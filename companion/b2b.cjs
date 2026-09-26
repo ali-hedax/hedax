@@ -4,6 +4,8 @@ const fs = require('node:fs/promises');
 const REPORT_URL = 'https://b2b.isaco.ir/PlanningReport';
 const STATUS = ['همه', 'در صف نوبت', 'در صف پذیرش', 'در صف تقسیم کار', 'در صف سالن', 'در حال تعمیر', 'در صف تغییر جایگاه'];
 const HALLS = ['سالن تعمیرات', 'فضای گازسوز', 'سرویس سریع'];
+// Shown while HEDAX waits for the user; fetching resumes on its own afterwards.
+const LOGIN_WAIT_MESSAGE = 'در پنجرهٔ Chrome وارد B2B شوید؛ دریافت گزارش‌ها پس از ورود خودکار ادامه پیدا می‌کند.';
 function failure(code, message) { return Object.assign(new Error(message), {code}); }
 function validateScope(input) {
   if (!input || typeof input !== 'object') throw failure('INVALID_SCOPE', 'محدوده گزارش نامعتبر است.');
@@ -58,9 +60,31 @@ class B2BClient {
     try {
       const page = await this.open();
       await page.bringToFront();
+      // Only navigate when the window is somewhere else entirely. Re-opening the
+      // report URL while the user is halfway through a password or a captcha
+      // would throw their input away.
       if (!page.url().startsWith('https://b2b.isaco.ir/')) await page.goto(REPORT_URL);
-      return {message:'ورود را در پنجرهٔ Google Chrome بازشده برای B2B انجام دهید؛ سپس دکمهٔ دریافت گزارش را بزنید.'};
+      return {message:LOGIN_WAIT_MESSAGE};
     } finally { this.busy=false; }
+  }
+  /* Passive login probe. It never launches a window, never navigates and never
+     reloads, so it is safe to call on a timer while the user is typing.
+     `ready` means "nothing here says the user is signed out" — it is a hint for
+     resuming, not proof. The authoritative check stays where it always was: a
+     report fetch that waits for the real report controls and raises
+     LOGIN_REQUIRED when they are absent. */
+  async state() {
+    if (this.busy) return {browser:'busy', ready:true, busy:true};
+    if (!this.context || !this.page || this.page.isClosed()) return {browser:'closed', ready:false, reason:'NO_WINDOW'};
+    let url;
+    try { url = new URL(this.page.url()); } catch { return {browser:'open', ready:false, reason:'NO_PAGE'}; }
+    if (url.origin !== 'https://b2b.isaco.ir') return {browser:'open', ready:false, reason:'OFF_SITE'};
+    let signInVisible = false;
+    try {
+      signInVisible = await this.page.locator('input[type="password"]').first().isVisible({timeout:1500});
+    } catch { signInVisible = false; } // a detached or navigating page is simply "not yet"
+    if (signInVisible) return {browser:'open', ready:false, reason:'LOGIN_FORM', path:url.pathname};
+    return {browser:'open', ready:true, path:url.pathname};
   }
   async sync(input) {
     const scope = validateScope(input);
@@ -74,10 +98,10 @@ class B2BClient {
       const report = page.getByRole('listbox', {name:'گزارش', exact:true});
       try { await report.waitFor({state:'visible', timeout:15000}); }
       catch {
-        if (new URL(page.url()).pathname !== '/PlanningReport') throw failure('LOGIN_REQUIRED', 'ورود B2B لازم است. در پنجرهٔ Google Chrome همراه هداکس وارد شوید و دوباره دریافت را بزنید.');
+        if (new URL(page.url()).pathname !== '/PlanningReport') throw failure('LOGIN_REQUIRED', LOGIN_WAIT_MESSAGE);
         throw failure('PAGE_CHANGED', 'فهرست گزارش نوبت‌دهی پیدا نشد؛ صفحهٔ B2B را بررسی کنید.');
       }
-      if (new URL(page.url()).origin !== 'https://b2b.isaco.ir') throw failure('LOGIN_REQUIRED', 'ورود B2B کامل نشده است.');
+      if (new URL(page.url()).origin !== 'https://b2b.isaco.ir') throw failure('LOGIN_REQUIRED', LOGIN_WAIT_MESSAGE);
       phase = 'تنظیم تاریخ، وضعیت و سالن';
       await selectReportValue(page, 'گزارش', 'گزارش نوبت دهی و برنامه تعمیرات');
       const date = page.getByRole('textbox', {name:'تاریخ روز', exact:true});
@@ -109,4 +133,4 @@ class B2BClient {
   async report(input) { return require('./operations.cjs').runOperation(this,input,selectReportValue); }
   async close() { if (this.context) await this.context.close(); }
 }
-module.exports = {B2BClient, validateScope, selectReportValue, STATUS, HALLS};
+module.exports = {B2BClient, validateScope, selectReportValue, STATUS, HALLS, LOGIN_WAIT_MESSAGE};
